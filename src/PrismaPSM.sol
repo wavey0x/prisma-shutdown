@@ -9,6 +9,8 @@ import "./interfaces/IBorrowerOperations.sol";
 import "./interfaces/ITroveManager.sol";
 import "./interfaces/IDebtToken.sol";
 import "./interfaces/IPrismaFactory.sol";
+import {Stash} from "src/Stash.sol";
+
 contract PrismaPSM {
     using SafeERC20 for IERC20;
 
@@ -17,6 +19,7 @@ contract PrismaPSM {
     IERC20 immutable public buyToken;
     IBorrowerOperations immutable public borrowerOps;
     IPrismaFactory immutable public factory;
+    address immutable public stash;
 
     address public owner;
     uint256 public rate; // Tokens unlocked per second
@@ -32,6 +35,9 @@ contract PrismaPSM {
     }
 
     constructor(address _debtToken, address _buyToken, address _borrowerOps) {
+        // Liquity systems prohibit Trove Managers from holding debt tokens
+        // So we create a simple stash contract to manage those transfers
+        stash = address(new Stash(_debtToken));
         owner = IBorrowerOperations(_borrowerOps).owner();
         buyToken = IERC20(_buyToken);
         debtToken = IERC20(_debtToken);
@@ -44,19 +50,19 @@ contract PrismaPSM {
         maxUnlock = 0; // Will need to be set by admin
     }
 
-    function getDebtTokenReserve() public view returns (uint256) {
+    function getDebtTokenReserve() public view returns (uint256 reserves, uint256 mintable) {
         uint256 timePassed = block.timestamp - lastPurchaseTime;
-        uint256 newTokens = timePassed * rate;
-        return Math.min(newTokens + debtToken.balanceOf(address(this)), maxUnlock);
+        mintable = timePassed * rate;
+        reserves = Math.min(mintable + debtToken.balanceOf(stash), maxUnlock);
     }
 
     function repayDebt(ITroveManager _troveManager, address _account, uint256 _amount) public {
         require(isValidTroveManager(address(_troveManager)), "PSM: Invalid trove manager");
-        uint256 debtTokenReserve = getDebtTokenReserve();
+        (uint256 debtTokenReserve, uint256 mintable) = getDebtTokenReserve();
         require(_amount <= debtTokenReserve, "PSM: Insufficient reserves");
         (, uint256 debt) = _troveManager.getTroveCollAndDebt(_account);
         _amount = Math.min(_amount, debt);
-        _mintDebtToken(_amount);
+        handleBurnMint(mintable, _amount);
         bool troveClosed = false;
         if (_amount < debt) {
             _amount -= borrowerOps.minNetDebt();
@@ -79,9 +85,27 @@ contract PrismaPSM {
         emit RepayDebt(_account, troveClosed, _amount);
     }
 
+    // Can bypass the trasnfer prohibition by minting directly to the PSM
+    function handleBurnMint(uint256 mintable, uint256 amount) internal {
+        uint256 stashBalance = debtToken.balanceOf(stash);
+        // first burn from stash
+        if (stashBalance >= amount) {
+            IDebtToken(address(debtToken)).burn(stash, amount);
+            IDebtToken(address(debtToken)).mint(address(this), amount);
+            return;
+        }
+        else{
+            if (stashBalance > 0) {
+                IDebtToken(address(debtToken)).burn(stash, stashBalance);
+                IDebtToken(address(debtToken)).mint(address(this), amount);
+                if (mintable > amount) IDebtToken(address(debtToken)).mint(stash, mintable - amount);
+            }
+        }
+    }
+
     // Add debt tokens to the PSM in return for buy tokens
     function sellDebtToken(uint256 amount) public {     
-        debtToken.safeTransfer(msg.sender, amount);
+        debtToken.safeTransferFrom(msg.sender, stash, amount);
         buyToken.safeTransfer(msg.sender, amount);
     }
 
@@ -90,11 +114,12 @@ contract PrismaPSM {
     }
 
     function _mintDebtToken(uint256 amount) internal {
-        IDebtToken(address(debtToken)).mint(address(this), amount);
+        IDebtToken(address(debtToken)).mint(stash, amount);
     }
 
     function getReserves() public view returns (uint256 debtTokenReserve, uint256 buyTokenReserve) {
-        return (getDebtTokenReserve(), buyToken.balanceOf(address(this)));
+        (debtTokenReserve, ) = getDebtTokenReserve();
+        buyTokenReserve = buyToken.balanceOf(address(this));
     }
 
     function setRate(uint256 _rate) external onlyOwner {
@@ -110,14 +135,7 @@ contract PrismaPSM {
     }
 
     function isValidTroveManager(address _troveManager) public view returns (bool isValid) {
-        uint256 count = factory.troveManagerCount();
-        for (uint256 i = count - 1; i > 0; i--) {
-            if (factory.troveManagers(i) == _troveManager) {
-                isValid = true;
-                break;
-            }
-        }
-        return isValid;
+        return IDebtToken(address(debtToken)).troveManager(_troveManager);
     }
 
     // Required TM interfaces
