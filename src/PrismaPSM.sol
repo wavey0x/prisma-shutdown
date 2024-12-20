@@ -13,6 +13,7 @@ import "./interfaces/IPrismaFactory.sol";
 contract PrismaPSM {
     using SafeERC20 for IERC20;
 
+    address public constant DEFAULT_OWNER = 0xfE11a5001EF95cbADd1a746D40B113e4AAA872F8;
     IERC20 immutable public debtToken;
     IERC20 immutable public buyToken;
     IBorrowerOperations immutable public borrowerOps;
@@ -25,6 +26,11 @@ contract PrismaPSM {
     uint256 public availableDebtTokens; // Current amount of unlocked tokens
 
     event RepayDebt(address indexed account, bool indexed troveClosed, uint256 amount);
+    event DebtTokenBought(address indexed account, bool indexed troveClosed, uint256 amount);
+    event DebtTokenSold(address indexed account, uint256 amount);
+    event RateSet(uint256 rate);
+    event MaxReserveSet(uint256 maxReserve);
+    event OwnerSet(address indexed owner);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "PSM: !owner");
@@ -79,30 +85,29 @@ contract PrismaPSM {
         buyToken.safeTransferFrom(msg.sender, address(this), _amount);
         lastPurchaseTime = block.timestamp; // This value will not transfer to the TM due to clone, must set elsewhere
 
-        emit RepayDebt(_account, troveClosed, _amount);
+        emit DebtTokenBought(_account, troveClosed, _amount);
     }
 
     // Add debt tokens to the PSM in return for buy tokens
     function sellDebtToken(uint256 amount) public {
-        // Cannot transfer to the PSM because Liquity prohibits Trove Managers from holding debt tokens
-        // We can bypass that requirement by minting directly
         if (amount == 0) return;
-        _mintDebtToken(amount);
-        _burnDebtToken(msg.sender, amount);
-        
-        buyToken.safeTransfer(msg.sender, amount);
+        _transferDebtTokenToSelf(msg.sender, amount);   // pull debt token from seller
+        buyToken.safeTransfer(msg.sender, amount);      // send buy token to seller
+        emit DebtTokenSold(msg.sender, amount);
     }
 
     function getCollateraAndDebt(ITroveManager _troveManager, address _account) public returns (uint256, uint256) {
         return _troveManager.applyPendingRewards(_account);
     }
 
-    function _mintDebtToken(uint256 amount) internal {
-        IDebtToken(address(debtToken)).mint(address(this), amount);
+    // We do this to bypass a Liquity requirement that debt token cannot be transferred to a Trove Manager
+    function _transferDebtTokenToSelf(address _account, uint256 amount) internal {
+        _mintDebtToken(amount);
+        IDebtToken(address(debtToken)).burn(_account, amount);
     }
 
-    function _burnDebtToken(address _account, uint256 amount) internal {
-        IDebtToken(address(debtToken)).burn(_account, amount);
+    function _mintDebtToken(uint256 amount) internal {
+        IDebtToken(address(debtToken)).mint(address(this), amount);
     }
 
     function getReserves() public view returns (uint256 debtTokenReserve, uint256 buyTokenReserve) {
@@ -114,16 +119,26 @@ contract PrismaPSM {
         rate = _rate;
         // Since this contract is a clone, we cannot initialize with a value for lastPurchaseTime
         if (lastPurchaseTime == 0) lastPurchaseTime = block.timestamp;
+        emit RateSet(_rate);
     }
 
     function setMaxReserve(uint256 _maxReserve) external onlyOwner {
         maxReserve = _maxReserve;
         // Since this contract is a clone, we cannot initialize with a value for lastPurchaseTime
         if (lastPurchaseTime == 0) lastPurchaseTime = block.timestamp;
+        emit MaxReserveSet(_maxReserve);
     }
 
-    function setOwner(address _owner) external onlyOwner {
+    function setOwner(address _owner) external {
+        // owner on init is 0x0 ... allow anyone permissionless setting to DEFAULT_OWNER
+        if (owner == address(0)) {
+            _owner = DEFAULT_OWNER;
+        }
+        else {
+            require(msg.sender == owner, "PSM: !owner");
+        }
         owner = _owner;
+        emit OwnerSet(_owner);
     }
 
     function isValidTroveManager(address _troveManager) public view returns (bool isValid) {

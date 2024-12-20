@@ -48,24 +48,34 @@ contract PrismaPSMTest is Test {
         IERC20(crvUSD).approve(address(psm), type(uint256).max);
         IBorrowerOperations(borrowerOps).setDelegateApproval(address(psm), true);
 
-        console.log("psm owner", psm.owner());
+        psm.setOwner(address(this));
+        assertEq(psm.owner(), psm.DEFAULT_OWNER());
+
         vm.startPrank(psm.owner());
         psm.setMaxReserve(100_000e18);
-        psm.setRate(1_000e18 / uint256(1 days)); // $1k per day
+        psm.setRate(1_000e18 / uint256(60)); // $1k per 60 seconds
         vm.stopPrank();
 
+        console.log("psm owner", psm.owner());
         vm.label(address(psm), "PSM");
     }
 
     function test_DebtTokenReserve() public {
-        console.log("debt token reserve", psm.getDebtTokenReserve());
+        for (uint256 i = 0; i < 10; i++) {
+            (uint256 debtTokenReserve, uint256 buyTokenReserve) = psm.getReserves();
+            console.log("debt token reserves after", i * 10, "minutes", debtTokenReserve);
+            console.log("buy token reserves after", i * 10, "minutes", buyTokenReserve);
+            skip(10 minutes);
+        }
     }
 
     function test_RepayDebtAndCloseTrove() public {
         deal(crvUSD, address(this), 100_000e18);
-        uint256 toRepay = 55_000e18;
-        openTrove(toRepay);
-        (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
+        uint256 debt = 55_000e18;
+        uint256 coll;
+        uint256 toRepay = debt + 1_000e18;
+        openTrove(debt);
+        (coll, debt) = getCollAndDebt(address(this));
         vm.expectRevert("PSM: Insufficient reserves");
         psm.repayDebt(
             troveManager, 
@@ -116,6 +126,16 @@ contract PrismaPSMTest is Test {
         psm.sellDebtToken(amount);
         assertEq(buyTokenBalance(address(this)), amount);
         assertEq(debtTokenBalance(address(psm)), amount);
+    }
+
+    function test_SetOwner() public {
+        vm.expectRevert("PSM: !owner");
+        psm.setOwner(address(this));
+
+        vm.startPrank(psm.owner());
+        psm.setOwner(address(this));
+        vm.stopPrank();
+        assertEq(psm.owner(), address(this));
     }
 
     function buyTokenBalance(address account) public view returns (uint256) {
