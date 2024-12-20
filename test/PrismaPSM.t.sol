@@ -43,50 +43,87 @@ contract PrismaPSMTest is Test {
         psm = PrismaPSM(factory.troveManagers(troveManagerCount - 1));
         console.log("psmAddress", address(psm));
         deal(wsteth, address(this), 100e18);
-        deal(crvUSD, address(this), 100_000e18);
         IERC20(wsteth).approve(address(troveManager), type(uint256).max);
         IERC20(wsteth).approve(address(borrowerOps), type(uint256).max);
         IERC20(crvUSD).approve(address(psm), type(uint256).max);
-        IERC20(psm.debtToken()).approve(address(psm), type(uint256).max);
         IBorrowerOperations(borrowerOps).setDelegateApproval(address(psm), true);
 
         console.log("psm owner", psm.owner());
         vm.startPrank(psm.owner());
-        psm.setMaxUnlock(100_000e18);
-        psm.setRate(100e18);
+        psm.setMaxReserve(100_000e18);
+        psm.setRate(1_000e18 / uint256(1 days)); // $1k per day
         vm.stopPrank();
 
         vm.label(address(psm), "PSM");
     }
 
+    function test_DebtTokenReserve() public {
+        console.log("debt token reserve", psm.getDebtTokenReserve());
+    }
+
     function test_RepayDebtAndCloseTrove() public {
-        openTrove(50_000e18);
+        deal(crvUSD, address(this), 100_000e18);
+        uint256 toRepay = 55_000e18;
+        openTrove(toRepay);
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
-        console.log("before repay debt coll", coll);
-        console.log("before repay debt debt", debt);
-        psm.repayDebt(ITroveManager(troveManager), address(this), 55_000e18);
+        vm.expectRevert("PSM: Insufficient reserves");
+        psm.repayDebt(
+            troveManager, 
+            address(this), 
+            toRepay
+        );
+        // allow reserves to grow
+        skip(toRepay / psm.rate() + 1);
+        psm.repayDebt(
+            troveManager, 
+            address(this), 
+            toRepay
+        );
         (debt, coll) = getCollAndDebt(address(this));
-        console.log("after repay debt coll", coll);
-        console.log("after repay debt debt", debt);
         assertEq(debt, 0);
         assertEq(coll, 0);
     }
 
     function test_RepayDebtPartial() public {
-        openTrove(50_000e18);
+        deal(crvUSD, address(this), 100_000e18);
+        uint256 toRepay = 55_000e18;
+        openTrove(toRepay);
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
-        console.log("before repay debt coll", coll);
-        console.log("before repay debt debt", debt);
+        vm.expectRevert("PSM: Insufficient reserves");
         psm.repayDebt(
-            ITroveManager(troveManager), 
+            troveManager, 
             address(this), 
-            5_000e18
+            toRepay
+        );
+        // allow reserves to grow
+        skip(toRepay / psm.rate() + 1);
+        psm.repayDebt(
+            troveManager, 
+            address(this), 
+            toRepay
         );
         (debt, coll) = getCollAndDebt(address(this));
-        console.log("after repay debt coll", coll);
-        console.log("after repay debt debt", debt);
         assertGt(debt, 0);
         assertGt(coll, 0);
+    }
+
+
+    function test_SellDebtToken(uint256 amount) public {
+        amount = bound(amount, 0, type(uint112).max);
+        // uint256 amount = 5_000_000e18;
+        deal(address(psm.buyToken()), address(psm), amount);
+        deal(address(psm.debtToken()), address(this), amount);
+        psm.sellDebtToken(amount);
+        assertEq(buyTokenBalance(address(this)), amount);
+        assertEq(debtTokenBalance(address(psm)), amount);
+    }
+
+    function buyTokenBalance(address account) public view returns (uint256) {
+        return IERC20(address(psm.buyToken())).balanceOf(account);
+    }
+
+    function debtTokenBalance(address account) public view returns (uint256) {
+        return IERC20(address(psm.debtToken())).balanceOf(account);
     }
 
     function openTrove(uint256 debtAmount) public {
@@ -101,18 +138,8 @@ contract PrismaPSMTest is Test {
             address(0)      // lowerHint
         );
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
-        console.log("coll", coll);
-        console.log("debt", debt);
         assertGt(coll, 0);
         assertGt(debt, 0);
-    }
-
-    function test_SellDebtToken(uint256 amount) public {
-        deal(address(psm.buyToken()), address(psm), amount);
-        deal(address(psm.debtToken()), address(this), amount);
-        psm.sellDebtToken(amount);
-        assertEq(IERC20(address(psm.buyToken())).balanceOf(address(psm)), amount);
-        assertEq(IERC20(address(psm.debtToken())).balanceOf(address(this)), amount);
     }
 
     function getCollAndDebt(address account) public view returns (uint256 coll, uint256 debt) {

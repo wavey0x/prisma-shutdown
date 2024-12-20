@@ -9,21 +9,18 @@ import "./interfaces/IBorrowerOperations.sol";
 import "./interfaces/ITroveManager.sol";
 import "./interfaces/IDebtToken.sol";
 import "./interfaces/IPrismaFactory.sol";
-import {Stash} from "src/Stash.sol";
 
 contract PrismaPSM {
     using SafeERC20 for IERC20;
 
-    
     IERC20 immutable public debtToken;
     IERC20 immutable public buyToken;
     IBorrowerOperations immutable public borrowerOps;
     IPrismaFactory immutable public factory;
-    address immutable public stash;
 
     address public owner;
     uint256 public rate; // Tokens unlocked per second
-    uint256 public maxUnlock; // Maximum tokens that can be unlocked
+    uint256 public maxReserve; // Maximum tokens that can be unlocked
     uint256 public lastPurchaseTime; // Timestamp of last purchase
     uint256 public availableDebtTokens; // Current amount of unlocked tokens
 
@@ -34,10 +31,11 @@ contract PrismaPSM {
         _;
     }
 
-    constructor(address _debtToken, address _buyToken, address _borrowerOps) {
-        // Liquity systems prohibit Trove Managers from holding debt tokens
-        // So we create a simple stash contract to manage those transfers
-        stash = address(new Stash(_debtToken));
+    constructor(
+        address _debtToken, 
+        address _buyToken, 
+        address _borrowerOps
+    ) {
         owner = IBorrowerOperations(_borrowerOps).owner();
         buyToken = IERC20(_buyToken);
         debtToken = IERC20(_debtToken);
@@ -46,28 +44,27 @@ contract PrismaPSM {
         borrowerOps = IBorrowerOperations(_borrowerOps);
         factory = IPrismaFactory(IBorrowerOperations(_borrowerOps).factory());
         lastPurchaseTime = block.timestamp;
-        rate = 0; // Will need to be set by admin
-        maxUnlock = 0; // Will need to be set by admin
     }
 
-    function getDebtTokenReserve() public view returns (uint256 reserves, uint256 mintable) {
+    function getDebtTokenReserve() public view returns (uint256 reserves) {
         uint256 timePassed = block.timestamp - lastPurchaseTime;
-        mintable = timePassed * rate;
-        reserves = Math.min(mintable + debtToken.balanceOf(stash), maxUnlock);
+        uint256 mintable = timePassed * rate;
+        reserves = Math.min(mintable + debtToken.balanceOf(address(this)), maxReserve);
     }
 
-    function repayDebt(ITroveManager _troveManager, address _account, uint256 _amount) public {
-        require(isValidTroveManager(address(_troveManager)), "PSM: Invalid trove manager");
-        (uint256 debtTokenReserve, uint256 mintable) = getDebtTokenReserve();
+    function repayDebt(address _troveManager, address _account, uint256 _amount) public {
+        require(isValidTroveManager(_troveManager), "PSM: Invalid trove manager");
+        uint256 debtTokenReserve = getDebtTokenReserve();
         require(_amount <= debtTokenReserve, "PSM: Insufficient reserves");
-        (, uint256 debt) = _troveManager.getTroveCollAndDebt(_account);
+        _mintDebtToken(debtTokenReserve);
+        (, uint256 debt) = ITroveManager(_troveManager).getTroveCollAndDebt(_account);
+        require(debt > 0, "PSM: Account has no debt");
         _amount = Math.min(_amount, debt);
-        handleBurnMint(mintable, _amount);
         bool troveClosed = false;
-        if (_amount < debt) {
+        if (_amount < debt) { // Determine whether partial repayment, or should close trove
             _amount -= borrowerOps.minNetDebt();
             borrowerOps.repayDebt(
-                address(_troveManager),
+                _troveManager,
                 _account,
                 _amount,
                 address(0),
@@ -76,36 +73,23 @@ contract PrismaPSM {
         }
         else{
             troveClosed = true;
-            borrowerOps.closeTrove(address(_troveManager), _account);
+            borrowerOps.closeTrove(_troveManager, _account);
         }
         
         buyToken.safeTransferFrom(msg.sender, address(this), _amount);
-        lastPurchaseTime = block.timestamp;
+        lastPurchaseTime = block.timestamp; // This value will not transfer to the TM due to clone, must set elsewhere
 
         emit RepayDebt(_account, troveClosed, _amount);
     }
 
-    // Can bypass the trasnfer prohibition by minting directly to the PSM
-    function handleBurnMint(uint256 mintable, uint256 amount) internal {
-        uint256 stashBalance = debtToken.balanceOf(stash);
-        // first burn from stash
-        if (stashBalance >= amount) {
-            IDebtToken(address(debtToken)).burn(stash, amount);
-            IDebtToken(address(debtToken)).mint(address(this), amount);
-            return;
-        }
-        else{
-            if (stashBalance > 0) {
-                IDebtToken(address(debtToken)).burn(stash, stashBalance);
-                IDebtToken(address(debtToken)).mint(address(this), amount);
-                if (mintable > amount) IDebtToken(address(debtToken)).mint(stash, mintable - amount);
-            }
-        }
-    }
-
     // Add debt tokens to the PSM in return for buy tokens
-    function sellDebtToken(uint256 amount) public {     
-        debtToken.safeTransferFrom(msg.sender, stash, amount);
+    function sellDebtToken(uint256 amount) public {
+        // Cannot transfer to the PSM because Liquity prohibits Trove Managers from holding debt tokens
+        // We can bypass that requirement by minting directly
+        if (amount == 0) return;
+        _mintDebtToken(amount);
+        _burnDebtToken(msg.sender, amount);
+        
         buyToken.safeTransfer(msg.sender, amount);
     }
 
@@ -114,20 +98,28 @@ contract PrismaPSM {
     }
 
     function _mintDebtToken(uint256 amount) internal {
-        IDebtToken(address(debtToken)).mint(stash, amount);
+        IDebtToken(address(debtToken)).mint(address(this), amount);
+    }
+
+    function _burnDebtToken(address _account, uint256 amount) internal {
+        IDebtToken(address(debtToken)).burn(_account, amount);
     }
 
     function getReserves() public view returns (uint256 debtTokenReserve, uint256 buyTokenReserve) {
-        (debtTokenReserve, ) = getDebtTokenReserve();
+        debtTokenReserve = getDebtTokenReserve();
         buyTokenReserve = buyToken.balanceOf(address(this));
     }
 
     function setRate(uint256 _rate) external onlyOwner {
         rate = _rate;
+        // Since this contract is a clone, we cannot initialize with a value for lastPurchaseTime
+        if (lastPurchaseTime == 0) lastPurchaseTime = block.timestamp;
     }
 
-    function setMaxUnlock(uint256 _maxUnlock) external onlyOwner {
-        maxUnlock = _maxUnlock;
+    function setMaxReserve(uint256 _maxReserve) external onlyOwner {
+        maxReserve = _maxReserve;
+        // Since this contract is a clone, we cannot initialize with a value for lastPurchaseTime
+        if (lastPurchaseTime == 0) lastPurchaseTime = block.timestamp;
     }
 
     function setOwner(address _owner) external onlyOwner {
