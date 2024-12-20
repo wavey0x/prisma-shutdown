@@ -58,6 +58,11 @@ contract PrismaPSM {
         reserves = Math.min(mintable + debtToken.balanceOf(address(this)), maxReserve);
     }
 
+    /// @notice Repays debt for a trove using buy tokens at 1:1 rate
+    /// @dev Account with debt must first approve this contract as a delegate on BorrowerOperations
+    /// @param _troveManager The trove manager contract where the user has debt
+    /// @param _account The account whose trove debt is being repaid
+    /// @param _amount The amount of debt to repay
     function repayDebt(address _troveManager, address _account, uint256 _amount) public {
         require(isValidTroveManager(_troveManager), "PSM: Invalid trove manager");
         uint256 debtTokenReserve = getDebtTokenReserve();
@@ -88,7 +93,9 @@ contract PrismaPSM {
         emit DebtTokenBought(_account, troveClosed, _amount);
     }
 
-    // Add debt tokens to the PSM in return for buy tokens
+    /// @notice Sells debt tokens to the PSM in exchange for buy tokens at a 1:1 rate
+    /// @dev No approval check needed since _transferDebtTokenToSelf handles the transfer
+    /// @param amount The amount of debt tokens to sell
     function sellDebtToken(uint256 amount) public {
         if (amount == 0) return;
         _transferDebtTokenToSelf(msg.sender, amount);   // pull debt token from seller
@@ -96,8 +103,12 @@ contract PrismaPSM {
         emit DebtTokenSold(msg.sender, amount);
     }
 
-    function getCollateraAndDebt(ITroveManager _troveManager, address _account) public returns (uint256, uint256) {
-        return _troveManager.applyPendingRewards(_account);
+    /// @notice Returns the current reserves of both debt tokens and buy tokens
+    /// @return debtTokenReserve The amount of debt tokens available for repaying debt
+    /// @return buyTokenReserve The balance of buy tokens available to be sold via `sellDebtToken`
+    function getReserves() public view returns (uint256 debtTokenReserve, uint256 buyTokenReserve) {
+        debtTokenReserve = getDebtTokenReserve();
+        buyTokenReserve = buyToken.balanceOf(address(this));
     }
 
     // We do this to bypass a Liquity requirement that debt token cannot be transferred to a Trove Manager
@@ -108,11 +119,6 @@ contract PrismaPSM {
 
     function _mintDebtToken(uint256 amount) internal {
         IDebtToken(address(debtToken)).mint(address(this), amount);
-    }
-
-    function getReserves() public view returns (uint256 debtTokenReserve, uint256 buyTokenReserve) {
-        debtTokenReserve = getDebtTokenReserve();
-        buyTokenReserve = buyToken.balanceOf(address(this));
     }
 
     function setRate(uint256 _rate) external onlyOwner {
