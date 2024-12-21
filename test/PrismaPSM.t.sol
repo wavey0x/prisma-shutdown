@@ -134,12 +134,12 @@ contract PrismaPSMTest is Test {
 
     function test_SellDebtToken(uint256 amount) public {
         amount = bound(amount, 0, type(uint112).max);
-        // uint256 amount = 5_000_000e18;
         deal(address(psm.buyToken()), address(psm), amount);
         deal(address(psm.debtToken()), address(this), amount);
+        uint256 balBefore = debtTokenBalance(address(this));
         psm.sellDebtToken(amount);
         assertEq(buyTokenBalance(address(this)), amount);
-        assertEq(debtTokenBalance(address(psm)), amount);
+        if (amount > 0) assertLt(debtTokenBalance(address(this)), balBefore);
     }
 
     function test_CannotSellMoreThanOwned() public {
