@@ -153,10 +153,12 @@ contract PrismaPSM {
         emit OwnerSet(_owner);
     }
 
+    /// @notice Pauses the PSM by burning all debt tokens and setting rate and maxBuy to 0
     function pause() external onlyOwner {
         IDebtToken(address(debtToken)).burn(address(this), debtToken.balanceOf(address(this)));
         rate = 0;
         maxBuy = 0;
+        lastPurchaseTime = block.timestamp;
         emit Paused();
     }
 

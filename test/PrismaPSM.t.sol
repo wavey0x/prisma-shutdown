@@ -117,6 +117,20 @@ contract PrismaPSMTest is Test {
         assertGt(coll, 0);
     }
 
+    function test_Pause() public {
+        skip(1 days);
+        uint256 debtTokenReserve = psm.getDebtTokenReserve();
+        assertGt(debtTokenReserve, 0);
+
+        vm.startPrank(psm.owner());
+        psm.pause();
+        vm.stopPrank();
+
+        assertEq(psm.getDebtTokenReserve(), 0);
+        assertEq(psm.rate(), 0);
+        assertEq(psm.maxBuy(), 0);
+    }
+
 
     function test_SellDebtToken(uint256 amount) public {
         amount = bound(amount, 0, type(uint112).max);
