@@ -8,8 +8,6 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
 import { IBorrowerOperations } from "./interfaces/IBorrowerOperations.sol";
 import { ITroveManager } from "./interfaces/ITroveManager.sol";
 import { IDebtToken } from "./interfaces/IDebtToken.sol";
-import { IPrismaFactory } from "./interfaces/IPrismaFactory.sol";
-import { ISortedTroves } from "./interfaces/ISortedTroves.sol";
 
 contract PrismaPSM {
     using SafeERC20 for IERC20;
@@ -18,7 +16,6 @@ contract PrismaPSM {
     IERC20 immutable public debtToken;
     IERC20 immutable public buyToken;
     IBorrowerOperations immutable public borrowerOps;
-    IPrismaFactory immutable public factory;
 
     address public owner;
     uint256 public rate; // Tokens unlocked per second
@@ -49,7 +46,6 @@ contract PrismaPSM {
         require(ERC20(_debtToken).decimals() == 18, "PSM: 18 decimals required");
         require(ERC20(_buyToken).decimals() == 18, "PSM: 18 decimals required");
         borrowerOps = IBorrowerOperations(_borrowerOps);
-        factory = IPrismaFactory(IBorrowerOperations(_borrowerOps).factory());
         lastPurchaseTime = block.timestamp;
     }
 
