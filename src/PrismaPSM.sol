@@ -22,7 +22,7 @@ contract PrismaPSM {
 
     address public owner;
     uint256 public rate; // Tokens unlocked per second
-    uint256 public maxReserve; // Maximum tokens that can be unlocked
+    uint256 public maxBuy; // Maximum tokens that can be bought
     uint256 public lastPurchaseTime; // Timestamp of last purchase
     uint256 public availableDebtTokens; // Current amount of unlocked tokens
 
@@ -30,9 +30,9 @@ contract PrismaPSM {
     event DebtTokenBought(address indexed account, bool indexed troveClosed, uint256 amount);
     event DebtTokenSold(address indexed account, uint256 amount);
     event RateSet(uint256 rate);
-    event MaxReserveSet(uint256 maxReserve);
+    event MaxBuySet(uint256 maxBuy);
     event OwnerSet(address indexed owner);
-
+    event Paused();
     modifier onlyOwner() {
         require(msg.sender == owner, "PSM: !owner");
         _;
@@ -58,19 +58,12 @@ contract PrismaPSM {
     /// @param _troveManager The trove manager contract where the user has debt
     /// @param _account The account whose trove debt is being repaid
     /// @param _amount The amount of debt to repay
-    function repayDebt(address _troveManager, address _account, uint256 _amount) external {
-        _repayDebt(_troveManager, _account, _amount, address(0), address(0));
-    }
-
-    function repayDebtWithHints(address _troveManager, address _account, uint256 _amount, address _upperHint, address _lowerHint) external {
-        _repayDebt(_troveManager, _account, _amount, _upperHint, _lowerHint);
-    }
-
-    function _repayDebt(address _troveManager, address _account, uint256 _amount, address _upperHint, address _lowerHint) internal {
+    /// @param _upperHint The upper hint for the sorted troves
+    /// @param _lowerHint The lower hint for the sorted troves
+    function repayDebt(address _troveManager, address _account, uint256 _amount, address _upperHint, address _lowerHint) external {
         require(isValidTroveManager(_troveManager), "PSM: Invalid trove manager");
-        uint256 debtTokenReserve = getDebtTokenReserve();
-        require(_amount <= debtTokenReserve, "PSM: Insufficient reserves");
-        _mintDebtToken(debtTokenReserve);
+        _mintDebtToken(_getMintableDebtTokens());
+        require(_amount <= getDebtTokenReserve(), "PSM: Insufficient reserves");
         (, uint256 debt) = ITroveManager(_troveManager).getTroveCollAndDebt(_account);
         require(debt > 0, "PSM: Account has no debt");
         _amount = Math.min(_amount, debt);
@@ -107,9 +100,13 @@ contract PrismaPSM {
     }
 
     function getDebtTokenReserve() public view returns (uint256 reserves) {
+        reserves = Math.min(_getMintableDebtTokens() + debtToken.balanceOf(address(this)), maxBuy);
+    }
+
+    function _getMintableDebtTokens() internal view returns (uint256 mintable) {
         uint256 timePassed = block.timestamp - lastPurchaseTime;
-        uint256 mintable = timePassed * rate;
-        reserves = Math.min(mintable + debtToken.balanceOf(address(this)), maxReserve);
+        if (timePassed == 0) return 0;
+        mintable = timePassed * rate;
     }
 
     /// @notice Returns the current reserves of both debt tokens and buy tokens
@@ -137,11 +134,11 @@ contract PrismaPSM {
         emit RateSet(_rate);
     }
 
-    function setMaxReserve(uint256 _maxReserve) external onlyOwner {
-        maxReserve = _maxReserve;
+    function setMaxBuy(uint256 _maxBuy) external onlyOwner {
+        maxBuy = _maxBuy;
         // Since this contract is a clone, we cannot initialize with a value for lastPurchaseTime
         if (lastPurchaseTime == 0) lastPurchaseTime = block.timestamp;
-        emit MaxReserveSet(_maxReserve);
+        emit MaxBuySet(_maxBuy);
     }
 
     function setOwner(address _owner) external {
@@ -154,6 +151,13 @@ contract PrismaPSM {
         require(msg.sender == owner, "PSM: !owner");
         owner = _owner;
         emit OwnerSet(_owner);
+    }
+
+    function pause() external onlyOwner {
+        IDebtToken(address(debtToken)).burn(address(this), debtToken.balanceOf(address(this)));
+        rate = 0;
+        maxBuy = 0;
+        emit Paused();
     }
 
     function isValidTroveManager(address _troveManager) public view returns (bool isValid) {

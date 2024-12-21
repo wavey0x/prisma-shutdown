@@ -55,7 +55,7 @@ contract PrismaPSMTest is Test {
         assertEq(psm.owner(), psm.DEFAULT_OWNER());
 
         vm.startPrank(psm.owner());
-        psm.setMaxReserve(100_000e18);
+        psm.setMaxBuy(100_000e18);
         psm.setRate(1_000e18 / uint256(60)); // $1k per 60 seconds
         vm.stopPrank();
 
@@ -74,31 +74,6 @@ contract PrismaPSMTest is Test {
 
     function test_RepayDebtAndCloseTrove() public {
         deal(crvUSD, address(this), 100_000e18);
-        uint256 coll;
-        uint256 debt = 55_000e18;
-        uint256 toRepay = debt + 1_000e18;
-        openTrove(debt);
-        (coll, debt) = getCollAndDebt(address(this));
-        vm.expectRevert("PSM: Insufficient reserves");
-        psm.repayDebt(
-            troveManager, 
-            address(this), 
-            toRepay
-        );
-        // allow reserves to grow
-        skip(toRepay / psm.rate() + 1);
-        psm.repayDebt(
-            troveManager, 
-            address(this), 
-            toRepay
-        );
-        (debt, coll) = getCollAndDebt(address(this));
-        assertEq(debt, 0);
-        assertEq(coll, 0);
-    }
-
-    function test_RepayDebtAndCloseTroveWithHints() public {
-        deal(crvUSD, address(this), 100_000e18);
         openTrove(50_000e18);
         uint256 toRepay = 55_000e18;
         // allow reserves to grow
@@ -108,7 +83,7 @@ contract PrismaPSMTest is Test {
         (address upperHint, address lowerHint) = getHints(coll, newDebt);
         console.log("upperHint", upperHint);
         console.log("lowerHint", lowerHint);
-        psm.repayDebtWithHints(
+        psm.repayDebt(
             troveManager, 
             address(this), 
             toRepay,
@@ -124,36 +99,13 @@ contract PrismaPSMTest is Test {
         deal(crvUSD, address(this), 100_000e18);
         uint256 toRepay = 20_000e18;
         openTrove(toRepay*3);
-        (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
-        vm.expectRevert("PSM: Insufficient reserves");
-        psm.repayDebt(
-            troveManager, 
-            address(this), 
-            toRepay
-        );
-        // allow reserves to grow
-        skip(toRepay / psm.rate() + 1);
-        psm.repayDebt(
-            troveManager, 
-            address(this), 
-            toRepay
-        );
-        (debt, coll) = getCollAndDebt(address(this));
-        assertGt(debt, 0);
-        assertGt(coll, 0);
-    }
-
-    function test_RepayDebtPartialWithHints() public {
-        deal(crvUSD, address(this), 100_000e18);
-        uint256 toRepay = 20_000e18;
-        openTrove(toRepay*3);
         skip(toRepay / psm.rate() + 1);
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
         uint256 newDebt = debt > toRepay ? debt - toRepay : 0;
         (address upperHint, address lowerHint) = getHints(coll, newDebt);
         console.log("upperHint", upperHint);
         console.log("lowerHint", lowerHint);
-        psm.repayDebtWithHints(
+        psm.repayDebt(
             troveManager, 
             address(this), 
             toRepay,
