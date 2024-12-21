@@ -7,9 +7,12 @@ import { PrismaPSM } from "src/PrismaPSM.sol";
 import { IBorrowerOperations } from "src/interfaces/IBorrowerOperations.sol";
 import { ITroveManager } from "src/interfaces/ITroveManager.sol";
 import { IPrismaFactory } from "src/interfaces/IPrismaFactory.sol";
+import { IMultiCollateralHintHelpers } from "src/interfaces/IMultiCollateralHintHelpers.sol";
+import { ISortedTroves } from "src/interfaces/ISortedTroves.sol";
 
 contract PrismaPSMTest is Test {
     IPrismaFactory public constant factory = IPrismaFactory(0x70b66E20766b775B2E9cE5B718bbD285Af59b7E1);
+    IMultiCollateralHintHelpers public constant hintHelper = IMultiCollateralHintHelpers(0x3C5871D69C8d6503001e1A8f3bF7E5EbE447A9Cd);
     address public constant troveManager = 0x1CC79f3F47BfC060b6F761FcD1afC6D399a968B6;
     address public constant borrowerOps = 0x72c590349535AD52e6953744cb2A36B409542719;
     address public constant mkUSD = 0x4591DBfF62656E7859Afe5e45f6f47D3669fBB28;
@@ -71,8 +74,8 @@ contract PrismaPSMTest is Test {
 
     function test_RepayDebtAndCloseTrove() public {
         deal(crvUSD, address(this), 100_000e18);
-        uint256 debt = 55_000e18;
         uint256 coll;
+        uint256 debt = 55_000e18;
         uint256 toRepay = debt + 1_000e18;
         openTrove(debt);
         (coll, debt) = getCollAndDebt(address(this));
@@ -94,10 +97,33 @@ contract PrismaPSMTest is Test {
         assertEq(coll, 0);
     }
 
+    function test_RepayDebtAndCloseTroveWithHints() public {
+        deal(crvUSD, address(this), 100_000e18);
+        openTrove(65_000e18);
+        uint256 toRepay = 70_000e18;
+        // allow reserves to grow
+        skip(toRepay / psm.rate() + 1);
+        (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
+        uint256 newDebt = debt > toRepay ? debt - toRepay : 0;
+        (address upperHint, address lowerHint) = getHints(address(this), coll, newDebt);
+        console.log("upperHint", upperHint);
+        console.log("lowerHint", lowerHint);
+        psm.repayDebtWithHints(
+            troveManager, 
+            address(this), 
+            toRepay,
+            upperHint,
+            lowerHint
+        );
+        (debt, coll) = getCollAndDebt(address(this));
+        assertEq(debt, 0);
+        assertEq(coll, 0);
+    }
+
     function test_RepayDebtPartial() public {
         deal(crvUSD, address(this), 100_000e18);
-        uint256 toRepay = 55_000e18;
-        openTrove(toRepay);
+        uint256 toRepay = 80_000e18;
+        openTrove(toRepay*3);
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
         vm.expectRevert("PSM: Insufficient reserves");
         psm.repayDebt(
@@ -117,6 +143,28 @@ contract PrismaPSMTest is Test {
         assertGt(coll, 0);
     }
 
+    function test_RepayDebtPartialWithHints() public {
+        deal(crvUSD, address(this), 100_000e18);
+        uint256 toRepay = 80_000e18;
+        openTrove(toRepay*3);
+        skip(toRepay / psm.rate() + 1);
+        (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
+        uint256 newDebt = debt > toRepay ? debt - toRepay : 0;
+        (address upperHint, address lowerHint) = getHints(address(this), coll, newDebt);
+        console.log("upperHint", upperHint);
+        console.log("lowerHint", lowerHint);
+        psm.repayDebtWithHints(
+            troveManager, 
+            address(this), 
+            toRepay,
+            upperHint,
+            lowerHint
+        );
+        (debt, coll) = getCollAndDebt(address(this));
+        assertGt(debt, 0);
+        assertGt(coll, 0);
+    }
+
 
     function test_SellDebtToken(uint256 amount) public {
         amount = bound(amount, 0, type(uint112).max);
@@ -126,6 +174,12 @@ contract PrismaPSMTest is Test {
         psm.sellDebtToken(amount);
         assertEq(buyTokenBalance(address(this)), amount);
         assertEq(debtTokenBalance(address(psm)), amount);
+    }
+
+    function test_CannotSellMoreThanOwned() public {
+        deal(address(psm.debtToken()), address(this), 1e18);
+        vm.expectRevert("ERC20: burn amount exceeds balance");
+        psm.sellDebtToken(100_001e18);
     }
 
     function test_SetOwner() public {
@@ -164,5 +218,25 @@ contract PrismaPSMTest is Test {
 
     function getCollAndDebt(address account) public view returns (uint256 coll, uint256 debt) {
         (coll, debt) = ITroveManager(troveManager).getTroveCollAndDebt(account);
+    }
+
+    function getHints(uint256 coll, uint256 debt) public returns (address upperHint, address lowerHint) {
+        ISortedTroves sortedTroves = ISortedTroves(ITroveManager(troveManager).sortedTroves());
+        uint256 price = ITroveManager(troveManager).fetchPrice();
+        uint256 cr = hintHelper.computeCR(coll, debt, price);
+        uint256 NICR = hintHelper.computeNominalCR(coll, debt);
+
+        (address approxHint,,) = hintHelper.getApproxHint(
+            troveManager, 
+            cr, 
+            50,
+            1
+        );
+        
+        (upperHint, lowerHint) = sortedTroves.findInsertPosition(
+            NICR, 
+            approxHint, 
+            approxHint
+        );
     }
 }

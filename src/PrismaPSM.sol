@@ -5,10 +5,11 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
-import "./interfaces/IBorrowerOperations.sol";
-import "./interfaces/ITroveManager.sol";
-import "./interfaces/IDebtToken.sol";
-import "./interfaces/IPrismaFactory.sol";
+import { IBorrowerOperations } from "./interfaces/IBorrowerOperations.sol";
+import { ITroveManager } from "./interfaces/ITroveManager.sol";
+import { IDebtToken } from "./interfaces/IDebtToken.sol";
+import { IPrismaFactory } from "./interfaces/IPrismaFactory.sol";
+import { ISortedTroves } from "./interfaces/ISortedTroves.sol";
 
 contract PrismaPSM {
     using SafeERC20 for IERC20;
@@ -52,18 +53,20 @@ contract PrismaPSM {
         lastPurchaseTime = block.timestamp;
     }
 
-    function getDebtTokenReserve() public view returns (uint256 reserves) {
-        uint256 timePassed = block.timestamp - lastPurchaseTime;
-        uint256 mintable = timePassed * rate;
-        reserves = Math.min(mintable + debtToken.balanceOf(address(this)), maxReserve);
-    }
-
     /// @notice Repays debt for a trove using buy tokens at 1:1 rate
     /// @dev Account with debt must first approve this contract as a delegate on BorrowerOperations
     /// @param _troveManager The trove manager contract where the user has debt
     /// @param _account The account whose trove debt is being repaid
     /// @param _amount The amount of debt to repay
-    function repayDebt(address _troveManager, address _account, uint256 _amount) public {
+    function repayDebt(address _troveManager, address _account, uint256 _amount) external {
+        _repayDebt(_troveManager, _account, _amount, address(0), address(0));
+    }
+
+    function repayDebtWithHints(address _troveManager, address _account, uint256 _amount, address _upperHint, address _lowerHint) external {
+        _repayDebt(_troveManager, _account, _amount, _upperHint, _lowerHint);
+    }
+
+    function _repayDebt(address _troveManager, address _account, uint256 _amount, address _upperHint, address _lowerHint) internal {
         require(isValidTroveManager(_troveManager), "PSM: Invalid trove manager");
         uint256 debtTokenReserve = getDebtTokenReserve();
         require(_amount <= debtTokenReserve, "PSM: Insufficient reserves");
@@ -78,8 +81,8 @@ contract PrismaPSM {
                 _troveManager,
                 _account,
                 _amount,
-                address(0),
-                address(0)
+                _upperHint,
+                _lowerHint
             );
         }
         else{
@@ -101,6 +104,12 @@ contract PrismaPSM {
         _transferDebtTokenToSelf(msg.sender, amount);   // pull debt token from seller
         buyToken.safeTransfer(msg.sender, amount);      // send buy token to seller
         emit DebtTokenSold(msg.sender, amount);
+    }
+
+    function getDebtTokenReserve() public view returns (uint256 reserves) {
+        uint256 timePassed = block.timestamp - lastPurchaseTime;
+        uint256 mintable = timePassed * rate;
+        reserves = Math.min(mintable + debtToken.balanceOf(address(this)), maxReserve);
     }
 
     /// @notice Returns the current reserves of both debt tokens and buy tokens
@@ -138,11 +147,11 @@ contract PrismaPSM {
     function setOwner(address _owner) external {
         // owner on init is 0x0 ... allow anyone permissionless setting to DEFAULT_OWNER
         if (owner == address(0)) {
-            _owner = DEFAULT_OWNER;
+            owner = DEFAULT_OWNER;
+            emit OwnerSet(DEFAULT_OWNER);
+            return;
         }
-        else {
-            require(msg.sender == owner, "PSM: !owner");
-        }
+        require(msg.sender == owner, "PSM: !owner");
         owner = _owner;
         emit OwnerSet(_owner);
     }
