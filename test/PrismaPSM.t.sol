@@ -105,7 +105,7 @@ contract PrismaPSMTest is Test {
         skip(toRepay / psm.rate() + 1);
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
         uint256 newDebt = debt > toRepay ? debt - toRepay : 0;
-        (address upperHint, address lowerHint) = getHints(address(this), coll, newDebt);
+        (address upperHint, address lowerHint) = getHints(coll, newDebt);
         console.log("upperHint", upperHint);
         console.log("lowerHint", lowerHint);
         psm.repayDebtWithHints(
@@ -122,7 +122,7 @@ contract PrismaPSMTest is Test {
 
     function test_RepayDebtPartial() public {
         deal(crvUSD, address(this), 100_000e18);
-        uint256 toRepay = 80_000e18;
+        uint256 toRepay = 20_000e18;
         openTrove(toRepay*3);
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
         vm.expectRevert("PSM: Insufficient reserves");
@@ -145,12 +145,12 @@ contract PrismaPSMTest is Test {
 
     function test_RepayDebtPartialWithHints() public {
         deal(crvUSD, address(this), 100_000e18);
-        uint256 toRepay = 80_000e18;
+        uint256 toRepay = 20_000e18;
         openTrove(toRepay*3);
         skip(toRepay / psm.rate() + 1);
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
         uint256 newDebt = debt > toRepay ? debt - toRepay : 0;
-        (address upperHint, address lowerHint) = getHints(address(this), coll, newDebt);
+        (address upperHint, address lowerHint) = getHints(coll, newDebt);
         console.log("upperHint", upperHint);
         console.log("lowerHint", lowerHint);
         psm.repayDebtWithHints(
