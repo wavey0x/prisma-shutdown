@@ -21,9 +21,7 @@ contract PrismaPSM {
     uint256 public rate; // Tokens unlocked per second
     uint256 public maxBuy; // Maximum tokens that can be bought
     uint256 public lastPurchaseTime; // Timestamp of last purchase
-    uint256 public availableDebtTokens; // Current amount of unlocked tokens
 
-    event RepayDebt(address indexed account, bool indexed troveClosed, uint256 amount);
     event DebtTokenBought(address indexed account, bool indexed troveClosed, uint256 amount);
     event DebtTokenSold(address indexed account, uint256 amount);
     event RateSet(uint256 rate);
