@@ -99,8 +99,8 @@ contract PrismaPSMTest is Test {
 
     function test_RepayDebtAndCloseTroveWithHints() public {
         deal(crvUSD, address(this), 100_000e18);
-        openTrove(65_000e18);
-        uint256 toRepay = 70_000e18;
+        openTrove(50_000e18);
+        uint256 toRepay = 55_000e18;
         // allow reserves to grow
         skip(toRepay / psm.rate() + 1);
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
