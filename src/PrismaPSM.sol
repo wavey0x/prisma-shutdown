@@ -19,7 +19,7 @@ contract PrismaPSM {
 
     address public owner;
     uint256 public rate; // Tokens unlocked per second
-    uint256 public maxBuy; // Maximum tokens that can be bought
+    uint256 public maxBuy; // Maximum debt tokens that can be bought
     uint256 public lastPurchaseTime; // Timestamp of last purchase
 
     event DebtTokenBought(address indexed account, bool indexed troveClosed, uint256 amount);
@@ -38,13 +38,13 @@ contract PrismaPSM {
         address _buyToken, 
         address _borrowerOps
     ) {
-        owner = IBorrowerOperations(_borrowerOps).owner();
-        buyToken = IERC20(_buyToken);
+        // No need to set state variables (owner, etc) because this contract will be cloned
+        // and clones do not copy state from the original contract
         debtToken = IERC20(_debtToken);
+        buyToken = IERC20(_buyToken);
         require(ERC20(_debtToken).decimals() == 18, "PSM: 18 decimals required");
         require(ERC20(_buyToken).decimals() == 18, "PSM: 18 decimals required");
         borrowerOps = IBorrowerOperations(_borrowerOps);
-        lastPurchaseTime = block.timestamp;
     }
 
     /// @notice Repays debt for a trove using buy tokens at 1:1 rate
@@ -125,7 +125,10 @@ contract PrismaPSM {
 
     function setMaxBuy(uint256 _maxBuy) external onlyOwner {
         maxBuy = _maxBuy;
-        // Since this contract is a clone, we cannot initialize with a value for lastPurchaseTime
+        // Burn any excess debt tokens
+        uint256 balance = debtToken.balanceOf(address(this));
+        if (balance > maxBuy) IDebtToken(address(debtToken)).burn(address(this), balance - maxBuy);
+        // Since this contract is a clone, we must initialize this var with a value
         if (lastPurchaseTime == 0) lastPurchaseTime = block.timestamp;
         emit MaxBuySet(_maxBuy);
     }

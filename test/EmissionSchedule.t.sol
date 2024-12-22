@@ -27,6 +27,10 @@ contract EmissionScheduleTest is Test {
         (uint256 adjustedAmount, uint256 feeToDelegate) = vault.claimableRewardAfterBoost(address(this), CONVEX_VOTER, CONVEX_VOTER, address(stabilityPool));
         assertEq(adjustedAmount, 0);
         assertEq(feeToDelegate, 0);
+
+        address[] memory rewardContracts = new address[](1);
+        rewardContracts[0] = address(stabilityPool);
+        vault.batchClaimRewards(address(this), CONVEX_VOTER, rewardContracts, 10_000);
     }
 
     // migrate and skip by 1 week to enter first epoch with no emissions

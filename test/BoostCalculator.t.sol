@@ -30,6 +30,10 @@ contract BoostCalculatorTest is Test {
         (adjustedAmount, feeToDelegate) = vault.claimableRewardAfterBoost(address(this), CONVEX_VOTER, CONVEX_VOTER, address(stabilityPool));
         assertEq(adjustedAmount, 0);
         assertEq(feeToDelegate, 0);
+
+        address[] memory rewardContracts = new address[](1);
+        rewardContracts[0] = address(stabilityPool);
+        vault.batchClaimRewards(address(this), CONVEX_VOTER, rewardContracts, 10_000);
     }
 
     function migrateBoostCalculator() public {
