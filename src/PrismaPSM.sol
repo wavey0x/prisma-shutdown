@@ -28,6 +28,7 @@ contract PrismaPSM {
     event MaxBuySet(uint256 maxBuy);
     event OwnerSet(address indexed owner);
     event Paused();
+
     modifier onlyOwner() {
         require(msg.sender == owner, "PSM: !owner");
         _;
@@ -51,13 +52,13 @@ contract PrismaPSM {
     /// @dev Account with debt must first approve this contract as a delegate on BorrowerOperations
     /// @param _troveManager The trove manager contract where the user has debt
     /// @param _account The account whose trove debt is being repaid
-    /// @param _amount The amount of debt to repay
+    /// @param _amount The amount of debt to repay - recommended to overestimate!
     /// @param _upperHint The upper hint for the sorted troves
     /// @param _lowerHint The lower hint for the sorted troves
     function repayDebt(address _troveManager, address _account, uint256 _amount, address _upperHint, address _lowerHint) external {
         require(isValidTroveManager(_troveManager), "PSM: Invalid trove manager");
         _mintDebtToken(_getMintableDebtTokens(debtToken.balanceOf(address(this))));
-        require(_amount <= maxBuy, "PSM: Insufficient reserves");
+        _amount = Math.min(_amount, getDebtTokenReserve());
         (, uint256 debt) = ITroveManager(_troveManager).getTroveCollAndDebt(_account);
         require(debt > 0, "PSM: Account has no debt");
         _amount = Math.min(_amount, debt);
