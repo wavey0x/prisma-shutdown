@@ -12,7 +12,7 @@ import { IDebtToken } from "./interfaces/IDebtToken.sol";
 contract PrismaPSM {
     using SafeERC20 for IERC20;
 
-    address public constant DEFAULT_OWNER = 0xfE11a5001EF95cbADd1a746D40B113e4AAA872F8;
+    address constant public DEFAULT_OWNER = 0xfE11a5001EF95cbADd1a746D40B113e4AAA872F8;
     IERC20 immutable public debtToken;
     IERC20 immutable public buyToken;
     IBorrowerOperations immutable public borrowerOps;
@@ -134,7 +134,7 @@ contract PrismaPSM {
     }
 
     function setOwner(address _owner) external {
-        // owner on init is 0x0 ... allow anyone permissionless setting to DEFAULT_OWNER
+        // owner on init is 0x0 ... allow anyone permissionlessly update to DEFAULT_OWNER
         if (owner == address(0)) {
             owner = DEFAULT_OWNER;
             emit OwnerSet(DEFAULT_OWNER);
@@ -158,9 +158,27 @@ contract PrismaPSM {
         return IDebtToken(address(debtToken)).troveManager(_troveManager);
     }
 
-    // Required TM interfaces
+    // Required + OptionalTM interfaces
     function fetchPrice() public view returns (uint256) {}
     function setAddresses(address,address,address) external {}
     function setParameters(uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256) external {}
-    function getEntireSystemBalances() public view returns (uint256 collateral, uint256 debt, uint256 price) {}
+    function collateralToken() public view returns (address) {return address(buyToken);}
+    function getTroveStatus(address) external view returns (uint256) {}
+    function getTroveCollAndDebt(address) external view returns (uint256, uint256) {}
+    function getEntireDebtAndColl(address) external view returns (uint256, uint256, uint256, uint256) {}
+    function getEntireSystemColl() external view returns (uint256) {}
+    function getEntireSystemDebt() external view returns (uint256) {}
+    function getEntireSystemBalances() external view returns (uint256, uint256, uint256) {}
+    function getNominalICR(address) external view returns (uint256) {}
+    function getCurrentICR(address) external view returns (uint256) {}
+    function getTotalActiveCollateral() external view returns (uint256) {}
+    function getTotalActiveDebt() external view returns (uint256) {}
+    function getPendingCollAndDebtRewards(address) external view returns (uint256, uint256) {}
+    function hasPendingRewards(address) external view returns (bool) {}
+    function getRedemptionRate() external view returns (uint256) {}
+    function getRedemptionRateWithDecay(uint256) external view returns (uint256) {}
+    function getRedemptionFeeWithDecay(address) external view returns (uint256) {}
+    function getBorrowingRate(address) external view returns (uint256) {}
+    function getBorrowingRateWithDecay(address) external view returns (uint256) {}
+    function getBorrowingFeeWithDecay(address) external view returns (uint256) {}
 }
