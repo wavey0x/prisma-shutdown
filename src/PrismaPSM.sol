@@ -115,6 +115,7 @@ contract PrismaPSM {
     }
 
     function _mintDebtToken(uint256 amount) internal {
+        if (amount == 0) return;
         IDebtToken(address(debtToken)).mint(address(this), amount);
     }
 
