@@ -100,6 +100,7 @@ contract PrismaPSM {
     }
 
     function _getMintableDebtTokens(uint256 _balance) internal view returns (uint256 mintable) {
+        if (_balance > maxBuy) return 0;
         uint256 timePassed = block.timestamp - lastPurchaseTime;
         if (timePassed == 0) return 0;
         mintable = Math.min(timePassed * rate, maxBuy - _balance);
