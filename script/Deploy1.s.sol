@@ -12,7 +12,7 @@ contract Deploy is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         EmissionSchedule emissionSchedule = new EmissionSchedule();
-        BoostCalculator boostCalculator = new BoostCalculator();
+        // BoostCalculator boostCalculator = new BoostCalculator();
 
         vm.stopBroadcast();
     }

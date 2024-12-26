@@ -18,6 +18,7 @@ contract PrismaPSMTest is Test {
     address public constant mkUSD = 0x4591DBfF62656E7859Afe5e45f6f47D3669fBB28;
     address public constant crvUSD = 0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E;
     address public constant wsteth = 0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0;
+    address public constant exampleUser = 0x23CeF0B3fa3f1754f6f32CC113AcdD639edEa8ed;
 
     PrismaPSM public psmImpl;
 
@@ -45,7 +46,7 @@ contract PrismaPSMTest is Test {
         uint256 troveManagerCount = factory.troveManagerCount();
         psm = PrismaPSM(factory.troveManagers(troveManagerCount - 1));
         console.log("psmAddress", address(psm));
-        deal(wsteth, address(this), 100e18);
+        deal(wsteth, address(this), 1_000_000e18);
         IERC20(wsteth).approve(address(troveManager), type(uint256).max);
         IERC20(wsteth).approve(address(borrowerOps), type(uint256).max);
         IERC20(crvUSD).approve(address(psm), type(uint256).max);
@@ -56,11 +57,28 @@ contract PrismaPSMTest is Test {
 
         vm.startPrank(psm.owner());
         psm.setMaxBuy(100_000e18);
-        psm.setRate(1_000e18 / uint256(60)); // $1k per 60 seconds
+        psm.setRate(100_000e18 / uint256(60)); // $1k per 60 seconds
         vm.stopPrank();
 
         console.log("psm owner", psm.owner());
         vm.label(address(psm), "PSM");
+
+        // Debt caps are closed, but we need to open them to test
+        ITroveManager tm = ITroveManager(troveManager);
+        vm.startPrank(tm.owner());
+        tm.setParameters(
+            tm.minuteDecayFactor(),
+            tm.redemptionFeeFloor(),
+            tm.maxRedemptionFee(),
+            tm.borrowingFeeFloor(),
+            tm.maxBorrowingFee(),
+            (tm.interestRate() * 10_000 * 31_536_000) / 1e27, // Convert to BPS
+            100_000_000e18,
+            tm.MCR()
+        );
+        vm.stopPrank();
+
+        vm.label(exampleUser, "ExampleUser");
     }
 
     function test_DebtTokenReserve() public {
@@ -83,7 +101,7 @@ contract PrismaPSMTest is Test {
         (address upperHint, address lowerHint) = getHints(coll, newDebt);
         console.log("upperHint", upperHint);
         console.log("lowerHint", lowerHint);
-        psm.repayDebt(
+        uint256 repaid = psm.repayDebt(
             troveManager, 
             address(this), 
             toRepay,
@@ -91,8 +109,53 @@ contract PrismaPSMTest is Test {
             lowerHint
         );
         (debt, coll) = getCollAndDebt(address(this));
-        assertEq(debt, 0);
-        assertEq(coll, 0);
+        assertEq(debt, 0, "debt should be 0");
+        assertEq(coll, 0, "coll should be 0");
+
+        if (repaid > 0) {
+            deal(address(psm.debtToken()), address(this), repaid);
+            vm.expectEmit(true, false, false, true, address(psm));
+            emit PrismaPSM.DebtTokenSold(address(this), repaid);
+            sellDebtToken(repaid);
+        }
+    }
+
+    function test_RepayDebtAndCloseTroveRealUser() public {
+        vm.startPrank(psm.owner());
+        psm.setMaxBuy(type(uint256).max);
+        psm.setRate(1_000_000e18);
+        vm.stopPrank();
+        vm.startPrank(exampleUser);
+        deal(crvUSD, address(exampleUser), 1_000_000e18);
+        IBorrowerOperations(borrowerOps).setDelegateApproval(address(psm), true);
+        IERC20(crvUSD).approve(address(psm), type(uint256).max);
+        uint256 toRepay = 1_500_000e18;
+        // allow reserves to grow
+        skip(toRepay / psm.rate() + 1);
+        (uint256 coll, uint256 debt) = getCollAndDebt(exampleUser);
+        console.log("coll", coll/1e18);
+        console.log("debt", debt/1e18);
+        (address upperHint, address lowerHint) = getHints(0, 0);
+        console.log("upperHint", upperHint);
+        console.log("lowerHint", lowerHint);
+        uint256 repaid = psm.repayDebt(
+            troveManager, 
+            exampleUser, 
+            toRepay,
+            upperHint,
+            lowerHint
+        );
+        (debt, coll) = getCollAndDebt(exampleUser);
+        assertEq(debt, 0, "debt should be 0");
+        assertEq(coll, 0, "coll should be 0");
+
+        if (repaid > 0) {
+            deal(address(psm.debtToken()), address(exampleUser), repaid);
+            vm.expectEmit(true, false, false, true, address(psm));
+            emit PrismaPSM.DebtTokenSold(address(exampleUser), repaid);
+            sellDebtToken(repaid);
+        }
+        vm.stopPrank();
     }
 
     function test_RepayDebtPartial() public {
@@ -105,7 +168,7 @@ contract PrismaPSMTest is Test {
         (address upperHint, address lowerHint) = getHints(coll, newDebt);
         console.log("upperHint", upperHint);
         console.log("lowerHint", lowerHint);
-        psm.repayDebt(
+        uint256 repaid = psm.repayDebt(
             troveManager, 
             address(this), 
             toRepay,
@@ -115,6 +178,35 @@ contract PrismaPSMTest is Test {
         (debt, coll) = getCollAndDebt(address(this));
         assertGt(debt, 0);
         assertGt(coll, 0);
+
+
+        if (repaid > 0) {
+            deal(address(psm.debtToken()), address(this), repaid);
+            vm.expectEmit(true, false, false, true, address(psm));
+            emit PrismaPSM.DebtTokenSold(address(this), repaid);
+            sellDebtToken(repaid);
+        }
+    }
+
+    function test_SellDebtToken(uint256 amount) public {
+        amount = bound(amount, 0, type(uint112).max);
+        deal(address(psm.debtToken()), address(this), amount);
+        uint256 balBefore = debtTokenBalance(address(this));
+        sellDebtToken(amount);
+        assertEq(buyTokenBalance(address(this)), amount);
+        if (amount > 0) assertLt(debtTokenBalance(address(this)), balBefore);
+    }
+
+    function sellDebtToken(uint256 amount) public returns (uint256) {
+        if (buyTokenBalance(address(this)) < amount) 
+            deal(address(psm.buyToken()), address(psm), amount);
+        return psm.sellDebtToken(amount);
+    }
+
+    function test_CannotSellMoreThanOwned() public {
+        deal(address(psm.debtToken()), address(this), 1e18);
+        vm.expectRevert("ERC20: burn amount exceeds balance");
+        psm.sellDebtToken(100_001e18);
     }
 
     function test_Pause() public {
@@ -129,23 +221,6 @@ contract PrismaPSMTest is Test {
         assertEq(psm.getDebtTokenReserve(), 0);
         assertEq(psm.rate(), 0);
         assertEq(psm.maxBuy(), 0);
-    }
-
-
-    function test_SellDebtToken(uint256 amount) public {
-        amount = bound(amount, 0, type(uint112).max);
-        deal(address(psm.buyToken()), address(psm), amount);
-        deal(address(psm.debtToken()), address(this), amount);
-        uint256 balBefore = debtTokenBalance(address(this));
-        psm.sellDebtToken(amount);
-        assertEq(buyTokenBalance(address(this)), amount);
-        if (amount > 0) assertLt(debtTokenBalance(address(this)), balBefore);
-    }
-
-    function test_CannotSellMoreThanOwned() public {
-        deal(address(psm.debtToken()), address(this), 1e18);
-        vm.expectRevert("ERC20: burn amount exceeds balance");
-        psm.sellDebtToken(100_001e18);
     }
 
     function test_SetOwner() public {
@@ -167,7 +242,9 @@ contract PrismaPSMTest is Test {
     }
 
     function openTrove(uint256 debtAmount) public {
-        uint256 collatAmount = 100e18;
+        uint256 price = ITroveManager(troveManager).fetchPrice();
+        uint256 targetCr = 3e18;
+        uint256 collatAmount = targetCr * price / 1e18;
         IBorrowerOperations(borrowerOps).openTrove(
             troveManager,
             address(this),  // account
@@ -186,22 +263,49 @@ contract PrismaPSMTest is Test {
         (coll, debt) = ITroveManager(troveManager).getTroveCollAndDebt(account);
     }
 
+    // use target coll and debt to get hints
     function getHints(uint256 coll, uint256 debt) public returns (address upperHint, address lowerHint) {
         ISortedTroves sortedTroves = ISortedTroves(ITroveManager(troveManager).sortedTroves());
-        uint256 price = ITroveManager(troveManager).fetchPrice();
-        uint256 cr = hintHelper.computeCR(coll, debt, price);
-        uint256 NICR = hintHelper.computeNominalCR(coll, debt);
+        uint256 NICR;
+        if (debt == 0) {
+            NICR = type(uint256).max;
+        } else {
+            NICR = (coll * 1e20) / debt;
+        }
 
-        (address approxHint,,) = hintHelper.getApproxHint(
-            troveManager, 
-            cr, 
-            50,
-            1
+        // Get initial hints
+        (address approxHint, uint256 diff, ) = hintHelper.getApproxHint(
+            troveManager,
+            NICR,
+            55,    // Number of trials
+            42    // Random seed
         );
-        
+
+        // If no hint found or diff is too large, try with first and last
+        if (approxHint == address(0) || diff > 1e20) {
+            address first = sortedTroves.getFirst();
+            address last = sortedTroves.getLast();
+            
+            // If list is empty
+            if (first == address(0)) {
+                return (address(0), address(0));
+            }
+            
+            // Choose hints based on NICR comparison
+            uint256 firstNICR = ITroveManager(troveManager).getNominalICR(first);
+            if (NICR >= firstNICR) {
+                return (address(0), first);
+            }
+            
+            uint256 lastNICR = ITroveManager(troveManager).getNominalICR(last);
+            if (NICR <= lastNICR) {
+                return (last, address(0));
+            }
+        }
+
         (upperHint, lowerHint) = sortedTroves.findInsertPosition(
-            NICR, 
-            approxHint, 
+            NICR,
+            approxHint,
             approxHint
         );
     }

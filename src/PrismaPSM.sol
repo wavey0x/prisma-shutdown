@@ -16,6 +16,7 @@ contract PrismaPSM {
     IERC20 immutable public debtToken;
     IERC20 immutable public buyToken;
     IBorrowerOperations immutable public borrowerOps;
+    bool public ownerInit;
 
     address public owner;
     uint256 public rate; // Tokens unlocked per second
@@ -55,16 +56,19 @@ contract PrismaPSM {
     /// @param _amount The amount of debt to repay - recommended to overestimate!
     /// @param _upperHint The upper hint for the sorted troves
     /// @param _lowerHint The lower hint for the sorted troves
-    function repayDebt(address _troveManager, address _account, uint256 _amount, address _upperHint, address _lowerHint) external {
+    function repayDebt(
+        address _troveManager, 
+        address _account, 
+        uint256 _amount, 
+        address _upperHint, 
+        address _lowerHint
+    ) external returns (uint256) {
         require(isValidTroveManager(_troveManager), "PSM: Invalid trove manager");
-        _mintDebtToken(_getMintableDebtTokens(debtToken.balanceOf(address(this))));
-        _amount = Math.min(_amount, getDebtTokenReserve());
-        (, uint256 debt) = ITroveManager(_troveManager).getTroveCollAndDebt(_account);
-        require(debt > 0, "PSM: Account has no debt");
-        _amount = Math.min(_amount, debt);
-        bool troveClosed = false;
-        if (_amount < debt) { // Determine whether partial repayment, or should close trove
-            _amount -= borrowerOps.minNetDebt();
+        _mintDebtTokens();
+        bool troveClosed;
+        (_amount, troveClosed) = getRepayAmount(_troveManager, _account, _amount);
+        require(_amount > 0, "PSM: Cannot repay");
+        if (!troveClosed) {
             borrowerOps.repayDebt(
                 _troveManager,
                 _account,
@@ -74,7 +78,6 @@ contract PrismaPSM {
             );
         }
         else{
-            troveClosed = true;
             borrowerOps.closeTrove(_troveManager, _account);
         }
         
@@ -82,16 +85,33 @@ contract PrismaPSM {
         lastPurchaseTime = block.timestamp; // This value will not transfer to the TM due to clone, must set elsewhere
 
         emit DebtTokenBought(_account, troveClosed, _amount);
+        return _amount;
+    }
+
+    /// @notice Converts user input amount of debt to the actual amount of debt to be repaid and whether it is enough to close the trove
+    /// @param _troveManager The trove manager contract where the user has debt
+    /// @param _account The account whose trove debt is being repaid
+    /// @param _amount The amount of debt to repay -- overestimates are OK
+    /// @return _amount The amount of debt that can be repaid
+    /// @return troveClosed Whether the trove should be closed
+    function getRepayAmount(address _troveManager, address _account, uint256 _amount) public view returns (uint256, bool troveClosed) {
+        _amount = Math.min(_amount, getDebtTokenReserve());
+        (, uint256 debt) = ITroveManager(_troveManager).getTroveCollAndDebt(_account);
+        _amount = Math.min(_amount, debt);
+        if (_amount < debt) _amount -= borrowerOps.minNetDebt();
+        else troveClosed = true;
+        return (_amount, troveClosed);
     }
 
     /// @notice Sells debt tokens to the PSM in exchange for buy tokens at a 1:1 rate
     /// @dev No approval check needed since we can just burn the debt tokens
     /// @param amount The amount of debt tokens to sell
-    function sellDebtToken(uint256 amount) public {
-        if (amount == 0) return;
+    function sellDebtToken(uint256 amount) public returns (uint256) {
+        if (amount == 0) return 0;
         IDebtToken(address(debtToken)).burn(msg.sender, amount);
         buyToken.safeTransfer(msg.sender, amount);      // send buy token to seller
         emit DebtTokenSold(msg.sender, amount);
+        return amount;
     }
 
     function getDebtTokenReserve() public view returns (uint256 reserves) {
@@ -114,7 +134,8 @@ contract PrismaPSM {
         buyTokenReserve = buyToken.balanceOf(address(this));
     }
 
-    function _mintDebtToken(uint256 amount) internal {
+    function _mintDebtTokens() internal {
+        uint256 amount = _getMintableDebtTokens(debtToken.balanceOf(address(this)));
         if (amount == 0) return;
         IDebtToken(address(debtToken)).mint(address(this), amount);
     }
@@ -138,8 +159,9 @@ contract PrismaPSM {
 
     function setOwner(address _owner) external {
         // owner on init is 0x0 ... allow anyone permissionlessly update to DEFAULT_OWNER
-        if (owner == address(0)) {
+        if (!ownerInit) {
             owner = DEFAULT_OWNER;
+            ownerInit = true;
             emit OwnerSet(DEFAULT_OWNER);
             return;
         }
@@ -161,7 +183,8 @@ contract PrismaPSM {
         return IDebtToken(address(debtToken)).troveManager(_troveManager);
     }
 
-    // Required + OptionalTM interfaces
+    // Required + Optional TM interfaces
+    // useful for avoiding reverts on calls from pre-existing helper contracts that rely on standard interface
     function fetchPrice() public view returns (uint256) {}
     function setAddresses(address,address,address) external {}
     function setParameters(uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256) external {}
