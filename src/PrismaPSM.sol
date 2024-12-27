@@ -20,7 +20,6 @@ contract PrismaPSM {
     bool public ownerInit;
     address public owner;
     uint256 public maxBuy; // Maximum debt tokens that can be bought
-    uint256 public lastPurchaseTime; // Timestamp of last purchase
 
     event DebtTokenBought(address indexed account, bool indexed troveClosed, uint256 amount);
     event DebtTokenSold(address indexed account, uint256 amount);
@@ -143,7 +142,6 @@ contract PrismaPSM {
     function pause() external onlyOwner {
         IDebtToken(address(debtToken)).burn(address(this), debtToken.balanceOf(address(this)));
         maxBuy = 0;
-        lastPurchaseTime = block.timestamp;
         emit Paused();
     }
 
