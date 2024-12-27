@@ -16,16 +16,14 @@ contract PrismaPSM {
     IERC20 immutable public debtToken;
     IERC20 immutable public buyToken;
     IBorrowerOperations immutable public borrowerOps;
+    
     bool public ownerInit;
-
     address public owner;
-    uint256 public rate; // Tokens unlocked per second
     uint256 public maxBuy; // Maximum debt tokens that can be bought
     uint256 public lastPurchaseTime; // Timestamp of last purchase
 
     event DebtTokenBought(address indexed account, bool indexed troveClosed, uint256 amount);
     event DebtTokenSold(address indexed account, uint256 amount);
-    event RateSet(uint256 rate);
     event MaxBuySet(uint256 maxBuy);
     event OwnerSet(address indexed owner);
     event Paused();
@@ -64,9 +62,9 @@ contract PrismaPSM {
         address _lowerHint
     ) external returns (uint256) {
         require(isValidTroveManager(_troveManager), "PSM: Invalid trove manager");
-        _mintDebtTokens();
         bool troveClosed;
         (_amount, troveClosed) = getRepayAmount(_troveManager, _account, _amount);
+        _mintDebtTokens(_amount);
         require(_amount > 0, "PSM: Cannot repay");
         if (!troveClosed) {
             borrowerOps.repayDebt(
@@ -95,11 +93,15 @@ contract PrismaPSM {
     /// @return _amount The amount of debt that can be repaid
     /// @return troveClosed Whether the trove should be closed
     function getRepayAmount(address _troveManager, address _account, uint256 _amount) public view returns (uint256, bool troveClosed) {
-        _amount = Math.min(_amount, getDebtTokenReserve());
         (, uint256 debt) = ITroveManager(_troveManager).getTroveCollAndDebt(_account);
         _amount = Math.min(_amount, debt);
-        if (_amount < debt) _amount -= borrowerOps.minNetDebt();
-        else troveClosed = true;
+        _amount = Math.min(_amount, maxBuy);
+        uint256 minDebt = borrowerOps.minNetDebt();
+        if (_amount == debt) {
+            troveClosed = true;
+        } else if (debt - _amount < minDebt) {
+            _amount = debt - minDebt;
+        }
         return (_amount, troveClosed);
     }
 
@@ -114,46 +116,13 @@ contract PrismaPSM {
         return amount;
     }
 
-    function getDebtTokenReserve() public view returns (uint256 reserves) {
-        uint256 balance = debtToken.balanceOf(address(this));
-        reserves = Math.min(_getMintableDebtTokens(balance) + balance, maxBuy);
-    }
-
-    function _getMintableDebtTokens(uint256 _balance) internal view returns (uint256 mintable) {
-        if (_balance > maxBuy) return 0;
-        uint256 timePassed = block.timestamp - lastPurchaseTime;
-        if (timePassed == 0) return 0;
-        mintable = Math.min(timePassed * rate, maxBuy - _balance);
-    }
-
-    /// @notice Returns the current reserves of both debt tokens and buy tokens
-    /// @return debtTokenReserve The amount of debt tokens available for repaying debt
-    /// @return buyTokenReserve The balance of buy tokens available to be sold via `sellDebtToken`
-    function getReserves() public view returns (uint256 debtTokenReserve, uint256 buyTokenReserve) {
-        debtTokenReserve = getDebtTokenReserve();
-        buyTokenReserve = buyToken.balanceOf(address(this));
-    }
-
-    function _mintDebtTokens() internal {
-        uint256 amount = _getMintableDebtTokens(debtToken.balanceOf(address(this)));
+    function _mintDebtTokens(uint256 amount) internal {
         if (amount == 0) return;
         IDebtToken(address(debtToken)).mint(address(this), amount);
     }
 
-    function setRate(uint256 _rate) external onlyOwner {
-        rate = _rate;
-        // Since this contract is a clone, we cannot initialize with a value for lastPurchaseTime
-        if (lastPurchaseTime == 0) lastPurchaseTime = block.timestamp;
-        emit RateSet(_rate);
-    }
-
     function setMaxBuy(uint256 _maxBuy) external onlyOwner {
         maxBuy = _maxBuy;
-        // Burn any excess debt tokens
-        uint256 balance = debtToken.balanceOf(address(this));
-        if (balance > maxBuy) IDebtToken(address(debtToken)).burn(address(this), balance - maxBuy);
-        // Since this contract is a clone, we must initialize this var with a value
-        if (lastPurchaseTime == 0) lastPurchaseTime = block.timestamp;
         emit MaxBuySet(_maxBuy);
     }
 
@@ -170,10 +139,9 @@ contract PrismaPSM {
         emit OwnerSet(_owner);
     }
 
-    /// @notice Pauses the PSM by burning all debt tokens and setting rate and maxBuy to 0
+    /// @notice Pauses the PSM by burning all debt tokens and setting maxBuy to 0
     function pause() external onlyOwner {
         IDebtToken(address(debtToken)).burn(address(this), debtToken.balanceOf(address(this)));
-        rate = 0;
         maxBuy = 0;
         lastPurchaseTime = block.timestamp;
         emit Paused();

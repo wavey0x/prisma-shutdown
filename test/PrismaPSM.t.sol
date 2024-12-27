@@ -18,7 +18,7 @@ contract PrismaPSMTest is Test {
     address public constant mkUSD = 0x4591DBfF62656E7859Afe5e45f6f47D3669fBB28;
     address public constant crvUSD = 0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E;
     address public constant wsteth = 0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0;
-    address public constant exampleUser = 0x23CeF0B3fa3f1754f6f32CC113AcdD639edEa8ed;
+    address public constant exampleUser = 0x158E7aA19493a7AC5c9C84972fEd6d622bFAB0C8;
 
     PrismaPSM public psmImpl;
 
@@ -57,7 +57,6 @@ contract PrismaPSMTest is Test {
 
         vm.startPrank(psm.owner());
         psm.setMaxBuy(100_000e18);
-        psm.setRate(100_000e18 / uint256(60)); // $1k per 60 seconds
         vm.stopPrank();
 
         console.log("psm owner", psm.owner());
@@ -81,21 +80,11 @@ contract PrismaPSMTest is Test {
         vm.label(exampleUser, "ExampleUser");
     }
 
-    function test_DebtTokenReserve() public {
-        for (uint256 i = 0; i < 10; i++) {
-            (uint256 debtTokenReserve, uint256 buyTokenReserve) = psm.getReserves();
-            console.log("debt token reserves after", i * 10, "minutes", debtTokenReserve);
-            console.log("buy token reserves after", i * 10, "minutes", buyTokenReserve);
-            skip(10 minutes);
-        }
-    }
-
     function test_RepayDebtAndCloseTrove() public {
         deal(crvUSD, address(this), 100_000e18);
         openTrove(50_000e18);
         uint256 toRepay = 55_000e18;
         // allow reserves to grow
-        skip(toRepay / psm.rate() + 1);
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
         uint256 newDebt = debt > toRepay ? debt - toRepay : 0;
         (address upperHint, address lowerHint) = getHints(coll, newDebt);
@@ -123,7 +112,6 @@ contract PrismaPSMTest is Test {
     function test_RepayDebtAndCloseTroveRealUser() public {
         vm.startPrank(psm.owner());
         psm.setMaxBuy(type(uint256).max);
-        psm.setRate(1_000_000e18);
         vm.stopPrank();
         vm.startPrank(exampleUser);
         deal(crvUSD, address(exampleUser), 1_000_000e18);
@@ -131,7 +119,6 @@ contract PrismaPSMTest is Test {
         IERC20(crvUSD).approve(address(psm), type(uint256).max);
         uint256 toRepay = 1_500_000e18;
         // allow reserves to grow
-        skip(toRepay / psm.rate() + 1);
         (uint256 coll, uint256 debt) = getCollAndDebt(exampleUser);
         console.log("coll", coll/1e18);
         console.log("debt", debt/1e18);
@@ -162,7 +149,6 @@ contract PrismaPSMTest is Test {
         deal(crvUSD, address(this), 100_000e18);
         uint256 toRepay = 20_000e18;
         openTrove(toRepay*3);
-        skip(toRepay / psm.rate() + 1);
         (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
         uint256 newDebt = debt > toRepay ? debt - toRepay : 0;
         (address upperHint, address lowerHint) = getHints(coll, newDebt);
@@ -211,16 +197,10 @@ contract PrismaPSMTest is Test {
 
     function test_Pause() public {
         skip(1 days);
-        uint256 debtTokenReserve = psm.getDebtTokenReserve();
-        assertGt(debtTokenReserve, 0);
-
-        vm.startPrank(psm.owner());
+        vm.prank(psm.owner());
         psm.pause();
-        vm.stopPrank();
-
-        assertEq(psm.getDebtTokenReserve(), 0);
-        assertEq(psm.rate(), 0);
         assertEq(psm.maxBuy(), 0);
+        assertEq(debtTokenBalance(address(psm)), 0);
     }
 
     function test_SetOwner() public {
@@ -264,7 +244,7 @@ contract PrismaPSMTest is Test {
     }
 
     // use target coll and debt to get hints
-    function getHints(uint256 coll, uint256 debt) public returns (address upperHint, address lowerHint) {
+    function getHints(uint256 coll, uint256 debt) public view returns (address upperHint, address lowerHint) {
         ISortedTroves sortedTroves = ISortedTroves(ITroveManager(troveManager).sortedTroves());
         uint256 NICR;
         if (debt == 0) {
