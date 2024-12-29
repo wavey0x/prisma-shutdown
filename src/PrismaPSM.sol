@@ -77,10 +77,7 @@ contract PrismaPSM {
         else{
             borrowerOps.closeTrove(_troveManager, _account);
         }
-        
         buyToken.safeTransferFrom(msg.sender, address(this), _amount);
-        lastPurchaseTime = block.timestamp; // This value will not transfer to the TM due to clone, must set elsewhere
-
         emit DebtTokenBought(_account, troveClosed, _amount);
         return _amount;
     }
