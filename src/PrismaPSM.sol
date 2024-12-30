@@ -37,6 +37,9 @@ contract PrismaPSM {
         address _buyToken, 
         address _borrowerOps
     ) {
+        require(_debtToken != address(0), "PSM: zero address");
+        require(_buyToken != address(0), "PSM: zero address");
+        require(_borrowerOps != address(0), "PSM: zero address");
         // No need to set state variables (owner, etc) because this contract will be cloned
         // and clones do not copy state from the original contract
         debtToken = IERC20(_debtToken);
@@ -123,7 +126,7 @@ contract PrismaPSM {
     }
 
     function setOwner(address _owner) external {
-        // owner on init is 0x0 ... allow anyone permissionlessly update to DEFAULT_OWNER
+        // owner on init is 0x0 ... allow anyone permissionlessly initialize to DEFAULT_OWNER
         if (!ownerInit) {
             owner = DEFAULT_OWNER;
             ownerInit = true;
