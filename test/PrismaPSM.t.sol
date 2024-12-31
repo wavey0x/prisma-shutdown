@@ -3,6 +3,7 @@ pragma solidity ^0.8.13;
 
 import { Test, console } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { PrismaPSM } from "src/PrismaPSM.sol";
 import { IBorrowerOperations } from "src/interfaces/IBorrowerOperations.sol";
 import { ITroveManager } from "src/interfaces/ITroveManager.sol";
@@ -51,6 +52,7 @@ contract PrismaPSMTest is Test {
         }));
         uint256 troveManagerCount = factory.troveManagerCount();
         psm = PrismaPSM(factory.troveManagers(troveManagerCount - 1));
+        assertEq(psm.owner(), core.owner());
         console.log("psmAddress", address(psm));
         deal(wsteth, address(this), 1_000_000e18);
         IERC20(wsteth).approve(address(troveManager), type(uint256).max);
@@ -223,10 +225,40 @@ contract PrismaPSMTest is Test {
     }
 
     function test_SetPSMGuardian() public {
+        vm.expectRevert("Only owner");
+        psm.setPSMGuardian(address(this));
+
         vm.startPrank(psm.owner());
         psm.setPSMGuardian(address(this));
         vm.stopPrank();
         assertEq(psm.psmGuardian(), address(this));
+    }
+
+    function test_RecoverERC20() public {
+        IERC20 DAI = IERC20(0x6B175474E89094C44Da98b954EedeAC495271d0F);
+        uint256 amount = 100e18;
+        deal(address(DAI), address(psm), amount);
+
+        address owner = psm.owner();
+        address debtToken = address(psm.debtToken());
+        address buyToken = address(psm.buyToken());
+
+        vm.expectRevert("Only owner");
+        psm.recoverERC20(address(DAI), 1e18);
+
+        vm.startPrank(owner);
+        vm.expectRevert("PSM: Cannot recover debt token");
+        psm.recoverERC20(debtToken, 1e18);
+        vm.expectRevert("PSM: Cannot recover buy token");
+        psm.recoverERC20(buyToken, 1e18);
+        
+        assertGt(DAI.balanceOf(address(psm)), 0);
+        psm.recoverERC20(address(DAI), DAI.balanceOf(address(psm)));
+        assertEq(DAI.balanceOf(address(psm)), 0);
+        assertEq(DAI.balanceOf(owner), amount);
+
+        vm.stopPrank();
+        assertEq(debtTokenBalance(address(psm)), 0);
     }
 
     function buyTokenBalance(address account) public view returns (uint256) {
@@ -306,8 +338,8 @@ contract PrismaPSMTest is Test {
         );
     }
 
-    function requireNoCollateralInPSM(address troveManager) public view {
-        IERC20 collateralToken = IERC20(ITroveManager(troveManager).collateralToken());
+    function requireNoCollateralInPSM(address tm) public view {
+        IERC20 collateralToken = IERC20(ITroveManager(tm).collateralToken());
         assertEq(collateralToken.balanceOf(address(psm)), 0, "collateral should not be in psm");
     }
 }

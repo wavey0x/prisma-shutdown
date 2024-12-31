@@ -26,6 +26,7 @@ contract PrismaPSM is PrismaOwnable {
     event Paused();
     event PSMGuardianSet(address indexed psmGuardian);
     event ERC20Recovered(address indexed tokenAddress, uint256 tokenAmount);
+    
     modifier onlyOwnerOrPSMGuardian() {
         require(msg.sender == owner() || msg.sender == psmGuardian, "PSM: !ownerOrGuardian");
         _;
@@ -80,10 +81,10 @@ contract PrismaPSM is PrismaOwnable {
         }
         else{
             // When closing a trove, collat is always sent to this contract. Make sure it is sent back to user with trove (not msg.sender).
-            IERC20 collateralToken = IERC20(ITroveManager(_troveManager).collateralToken());
-            uint256 startBalance = collateralToken.balanceOf(address(this));
+            IERC20 collatToken = IERC20(ITroveManager(_troveManager).collateralToken());
+            uint256 startBalance = collatToken.balanceOf(address(this));
             borrowerOps.closeTrove(_troveManager, _account);
-            collateralToken.safeTransfer(_account, collateralToken.balanceOf(address(this)) - startBalance);
+            collatToken.safeTransfer(_account, collatToken.balanceOf(address(this)) - startBalance);
         }
         emit DebtTokenBought(_account, troveClosed, _amount);
         return _amount;
@@ -136,6 +137,8 @@ contract PrismaPSM is PrismaOwnable {
     }
 
     function recoverERC20(address tokenAddress, uint256 tokenAmount) external onlyOwner {
+        require(tokenAddress != address(debtToken), "PSM: Cannot recover debt token");
+        require(tokenAddress != address(buyToken), "PSM: Cannot recover buy token");
         IERC20(tokenAddress).safeTransfer(msg.sender, tokenAmount);
         emit ERC20Recovered(tokenAddress, tokenAmount);
     }
