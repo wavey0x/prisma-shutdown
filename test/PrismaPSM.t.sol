@@ -31,8 +31,8 @@ contract PrismaPSMTest is Test {
         vm.createSelectFork(vm.envString("MAINNET_URL"));
         IPrismaCore core = IPrismaCore(CORE);
         psmImpl = new PrismaPSM(CORE, mkUSD, crvUSD, borrowerOps);
-        assertEq(psm.owner(), core.owner());
-        
+        assertEq(psmImpl.owner(), core.owner());
+
         vm.prank(factory.owner());
         factory.deployNewInstance(
             address(0), 
@@ -92,11 +92,14 @@ contract PrismaPSMTest is Test {
         openTrove(50_000e18);
         uint256 toRepay = 55_000e18;
         // allow reserves to grow
-        (uint256 debt, uint256 coll) = getCollAndDebt(address(this));
+        (uint256 startColl, uint256 debt) = getCollAndDebt(address(this));
         uint256 newDebt = debt > toRepay ? debt - toRepay : 0;
-        (address upperHint, address lowerHint) = getHints(coll, newDebt);
+        (address upperHint, address lowerHint) = getHints(startColl, newDebt);
         console.log("upperHint", upperHint);
         console.log("lowerHint", lowerHint);
+        IERC20 collateralToken = IERC20(ITroveManager(troveManager).collateralToken());
+        uint256 preCollateralBalance = collateralToken.balanceOf(address(this));
+        requireNoCollateralInPSM(troveManager);
         uint256 repaid = psm.repayDebt(
             troveManager, 
             address(this), 
@@ -104,9 +107,14 @@ contract PrismaPSMTest is Test {
             upperHint,
             lowerHint
         );
+        requireNoCollateralInPSM(troveManager);
+        uint256 postCollateralBalance = collateralToken.balanceOf(address(this));
+        uint256 coll;
         (debt, coll) = getCollAndDebt(address(this));
         assertEq(debt, 0, "debt should be 0");
         assertEq(coll, 0, "coll should be 0");
+        assertGt(postCollateralBalance, preCollateralBalance, "collateral should be returned to user");
+        assertEq(postCollateralBalance - preCollateralBalance, startColl, "collateral should be returned to user");
 
         if (repaid > 0) {
             deal(address(psm.debtToken()), address(this), repaid);
@@ -132,6 +140,7 @@ contract PrismaPSMTest is Test {
         (address upperHint, address lowerHint) = getHints(0, 0);
         console.log("upperHint", upperHint);
         console.log("lowerHint", lowerHint);
+        requireNoCollateralInPSM(troveManager);
         uint256 repaid = psm.repayDebt(
             troveManager, 
             exampleUser, 
@@ -139,6 +148,7 @@ contract PrismaPSMTest is Test {
             upperHint,
             lowerHint
         );
+        requireNoCollateralInPSM(troveManager);
         (debt, coll) = getCollAndDebt(exampleUser);
         assertEq(debt, 0, "debt should be 0");
         assertEq(coll, 0, "coll should be 0");
@@ -161,6 +171,7 @@ contract PrismaPSMTest is Test {
         (address upperHint, address lowerHint) = getHints(coll, newDebt);
         console.log("upperHint", upperHint);
         console.log("lowerHint", lowerHint);
+        requireNoCollateralInPSM(troveManager);
         uint256 repaid = psm.repayDebt(
             troveManager, 
             address(this), 
@@ -168,6 +179,7 @@ contract PrismaPSMTest is Test {
             upperHint,
             lowerHint
         );
+        requireNoCollateralInPSM(troveManager);
         (debt, coll) = getCollAndDebt(address(this));
         assertGt(debt, 0);
         assertGt(coll, 0);
@@ -292,5 +304,10 @@ contract PrismaPSMTest is Test {
             approxHint,
             approxHint
         );
+    }
+
+    function requireNoCollateralInPSM(address troveManager) public view {
+        IERC20 collateralToken = IERC20(ITroveManager(troveManager).collateralToken());
+        assertEq(collateralToken.balanceOf(address(psm)), 0, "collateral should not be in psm");
     }
 }

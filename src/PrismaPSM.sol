@@ -25,7 +25,7 @@ contract PrismaPSM is PrismaOwnable {
     event OwnerSet(address indexed owner);
     event Paused();
     event PSMGuardianSet(address indexed psmGuardian);
-
+    event ERC20Recovered(address indexed tokenAddress, uint256 tokenAmount);
     modifier onlyOwnerOrPSMGuardian() {
         require(msg.sender == owner() || msg.sender == psmGuardian, "PSM: !ownerOrGuardian");
         _;
@@ -66,8 +66,9 @@ contract PrismaPSM is PrismaOwnable {
         require(isValidTroveManager(_troveManager), "PSM: Invalid trove manager");
         bool troveClosed;
         (_amount, troveClosed) = getRepayAmount(_troveManager, _account, _amount);
-        _mintDebtTokens(_amount);
         require(_amount > 0, "PSM: Cannot repay");
+        buyToken.safeTransferFrom(msg.sender, address(this), _amount);
+        _mintDebtTokens(_amount);
         if (!troveClosed) {
             borrowerOps.repayDebt(
                 _troveManager,
@@ -78,9 +79,12 @@ contract PrismaPSM is PrismaOwnable {
             );
         }
         else{
+            // When closing a trove, collat is always sent to this contract. Make sure it is sent back to user with trove (not msg.sender).
+            IERC20 collateralToken = IERC20(ITroveManager(_troveManager).collateralToken());
+            uint256 startBalance = collateralToken.balanceOf(address(this));
             borrowerOps.closeTrove(_troveManager, _account);
+            collateralToken.safeTransfer(_account, collateralToken.balanceOf(address(this)) - startBalance);
         }
-        buyToken.safeTransferFrom(msg.sender, address(this), _amount);
         emit DebtTokenBought(_account, troveClosed, _amount);
         return _amount;
     }
@@ -116,7 +120,6 @@ contract PrismaPSM is PrismaOwnable {
     }
 
     function _mintDebtTokens(uint256 amount) internal {
-        if (amount == 0) return;
         IDebtToken(address(debtToken)).mint(address(this), amount);
     }
 
@@ -130,6 +133,11 @@ contract PrismaPSM is PrismaOwnable {
         IDebtToken(address(debtToken)).burn(address(this), debtToken.balanceOf(address(this)));
         maxBuy = 0;
         emit Paused();
+    }
+
+    function recoverERC20(address tokenAddress, uint256 tokenAmount) external onlyOwner {
+        IERC20(tokenAddress).safeTransfer(msg.sender, tokenAmount);
+        emit ERC20Recovered(tokenAddress, tokenAmount);
     }
 
     function setPSMGuardian(address _psmGuardian) external onlyOwner {
