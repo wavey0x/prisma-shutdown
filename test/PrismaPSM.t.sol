@@ -9,8 +9,11 @@ import { ITroveManager } from "src/interfaces/ITroveManager.sol";
 import { IPrismaFactory } from "src/interfaces/IPrismaFactory.sol";
 import { IMultiCollateralHintHelpers } from "src/interfaces/IMultiCollateralHintHelpers.sol";
 import { ISortedTroves } from "src/interfaces/ISortedTroves.sol";
+import { IPrismaCore } from "src/interfaces/IPrismaCore.sol";
 
 contract PrismaPSMTest is Test {
+    address constant GUARDIAN = 0xfE11a5001EF95cbADd1a746D40B113e4AAA872F8;
+    address constant CORE = 0x5d17eA085F2FF5da3e6979D5d26F1dBaB664ccf8;
     IPrismaFactory public constant factory = IPrismaFactory(0x70b66E20766b775B2E9cE5B718bbD285Af59b7E1);
     IMultiCollateralHintHelpers public constant hintHelper = IMultiCollateralHintHelpers(0x3C5871D69C8d6503001e1A8f3bF7E5EbE447A9Cd);
     address public constant troveManager = 0x1CC79f3F47BfC060b6F761FcD1afC6D399a968B6;
@@ -26,7 +29,10 @@ contract PrismaPSMTest is Test {
 
     function setUp() public {
         vm.createSelectFork(vm.envString("MAINNET_URL"));
-        psmImpl = new PrismaPSM(mkUSD, crvUSD, borrowerOps);
+        IPrismaCore core = IPrismaCore(CORE);
+        psmImpl = new PrismaPSM(CORE, mkUSD, crvUSD, borrowerOps);
+        assertEq(psm.owner(), core.owner());
+        
         vm.prank(factory.owner());
         factory.deployNewInstance(
             address(0), 
@@ -52,8 +58,9 @@ contract PrismaPSMTest is Test {
         IERC20(crvUSD).approve(address(psm), type(uint256).max);
         IBorrowerOperations(borrowerOps).setDelegateApproval(address(psm), true);
 
-        psm.setOwner(address(this));
-        assertEq(psm.owner(), psm.DEFAULT_OWNER());
+        vm.prank(psm.owner());
+        psm.setPSMGuardian(address(this));
+        assertEq(psm.psmGuardian(), address(this));
 
         vm.startPrank(psm.owner());
         psm.setMaxBuy(100_000e18);
@@ -203,14 +210,11 @@ contract PrismaPSMTest is Test {
         assertEq(debtTokenBalance(address(psm)), 0);
     }
 
-    function test_SetOwner() public {
-        vm.expectRevert("PSM: !owner");
-        psm.setOwner(address(this));
-
+    function test_SetPSMGuardian() public {
         vm.startPrank(psm.owner());
-        psm.setOwner(address(this));
+        psm.setPSMGuardian(address(this));
         vm.stopPrank();
-        assertEq(psm.owner(), address(this));
+        assertEq(psm.psmGuardian(), address(this));
     }
 
     function buyTokenBalance(address account) public view returns (uint256) {

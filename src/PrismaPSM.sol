@@ -8,17 +8,15 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
 import { IBorrowerOperations } from "./interfaces/IBorrowerOperations.sol";
 import { ITroveManager } from "./interfaces/ITroveManager.sol";
 import { IDebtToken } from "./interfaces/IDebtToken.sol";
-
-contract PrismaPSM {
+import { PrismaOwnable } from "./PrismaOwnable.sol";
+contract PrismaPSM is PrismaOwnable {
     using SafeERC20 for IERC20;
 
-    address constant public DEFAULT_OWNER = 0xfE11a5001EF95cbADd1a746D40B113e4AAA872F8;
     IERC20 immutable public debtToken;
     IERC20 immutable public buyToken;
     IBorrowerOperations immutable public borrowerOps;
     
-    bool public ownerInit;
-    address public owner;
+    address public psmGuardian;
     uint256 public maxBuy; // Maximum debt tokens that can be bought
 
     event DebtTokenBought(address indexed account, bool indexed troveClosed, uint256 amount);
@@ -26,17 +24,19 @@ contract PrismaPSM {
     event MaxBuySet(uint256 maxBuy);
     event OwnerSet(address indexed owner);
     event Paused();
+    event PSMGuardianSet(address indexed psmGuardian);
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "PSM: !owner");
+    modifier onlyOwnerOrPSMGuardian() {
+        require(msg.sender == owner() || msg.sender == psmGuardian, "PSM: !ownerOrGuardian");
         _;
     }
 
     constructor(
+        address _prismaCore,
         address _debtToken, 
         address _buyToken, 
         address _borrowerOps
-    ) {
+    ) PrismaOwnable(_prismaCore) {
         require(_debtToken != address(0), "PSM: zero address");
         require(_buyToken != address(0), "PSM: zero address");
         require(_borrowerOps != address(0), "PSM: zero address");
@@ -120,29 +120,21 @@ contract PrismaPSM {
         IDebtToken(address(debtToken)).mint(address(this), amount);
     }
 
-    function setMaxBuy(uint256 _maxBuy) external onlyOwner {
+    function setMaxBuy(uint256 _maxBuy) external onlyOwnerOrPSMGuardian {
         maxBuy = _maxBuy;
         emit MaxBuySet(_maxBuy);
     }
 
-    function setOwner(address _owner) external {
-        // owner on init is 0x0 ... allow anyone permissionlessly initialize to DEFAULT_OWNER
-        if (!ownerInit) {
-            owner = DEFAULT_OWNER;
-            ownerInit = true;
-            emit OwnerSet(DEFAULT_OWNER);
-            return;
-        }
-        require(msg.sender == owner, "PSM: !owner");
-        owner = _owner;
-        emit OwnerSet(_owner);
-    }
-
     /// @notice Pauses the PSM by burning all debt tokens and setting maxBuy to 0
-    function pause() external onlyOwner {
+    function pause() external onlyOwnerOrPSMGuardian {
         IDebtToken(address(debtToken)).burn(address(this), debtToken.balanceOf(address(this)));
         maxBuy = 0;
         emit Paused();
+    }
+
+    function setPSMGuardian(address _psmGuardian) external onlyOwner {
+        psmGuardian = _psmGuardian;
+        emit PSMGuardianSet(_psmGuardian);
     }
 
     function isValidTroveManager(address _troveManager) public view returns (bool isValid) {
