@@ -15,7 +15,7 @@ contract GasPoolReimburser is PrismaOwnable {
     IPrismaPSM immutable public psm;
     IERC20 immutable public debtToken;
     IERC20 immutable public crvUSD;
-    uint256 public allowanceUsed;
+    uint256 public totalMinted;
     address public gprGuardian;
 
     event GPRGuardianSet(address indexed gprGuardian);
@@ -46,8 +46,8 @@ contract GasPoolReimburser is PrismaOwnable {
     }
 
     function _mint(uint256 amount) internal {
-        allowanceUsed += amount;
-        require(allowanceUsed <= MAX_DEBT_LIMIT, "GPR: max debt limit exceeded");
+        totalMinted += amount;
+        require(totalMinted <= MAX_DEBT_LIMIT, "GPR: max debt limit exceeded");
         IDebtToken(address(debtToken)).mint(address(this), amount);
     }
 

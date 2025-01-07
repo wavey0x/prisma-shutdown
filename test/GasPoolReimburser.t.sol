@@ -13,9 +13,9 @@ contract GasPoolReimburserTest is Test {
     address constant CORE = 0x5d17eA085F2FF5da3e6979D5d26F1dBaB664ccf8;
     IPrismaFactory public constant factory = IPrismaFactory(0x70b66E20766b775B2E9cE5B718bbD285Af59b7E1);
     address public constant mkUSD = 0x4591DBfF62656E7859Afe5e45f6f47D3669fBB28;
-    address public constant crvUSD = 0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E;
     address public constant psm1 = 0x9d7634b2B99c2684611c0Ac3150bAF6AEEa4Ed77; // mkUSD PSM
     address public constant psm2 = 0xAe21Fe5B61998b143f721CE343aa650a6d5EadCe; // ULTRA PSM
+    IERC20 public constant crvusd = IERC20(0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E);
     GasPoolReimburser public gpr;
     GasPoolReimburser public gprImpl;
 
@@ -49,13 +49,17 @@ contract GasPoolReimburserTest is Test {
     }
 
     function test_reimburse() public {
+        uint256 psm1Balance = crvusd.balanceOf(address(psm1));
         address[] memory users = getUsers();
         vm.startPrank(GUARDIAN);
         gpr.reimburse(users);
-        assertEq(gpr.allowanceUsed(), GAS_POOL_FEE * users.length);
+        assertGt(psm1Balance, 0);
+        assertEq(gpr.totalMinted(), GAS_POOL_FEE * users.length);
         for (uint256 i = 0; i < users.length; i++) {
-            assertEq(IERC20(crvUSD).balanceOf(users[i]), GAS_POOL_FEE);
+            assertEq(crvusd.balanceOf(users[i]), GAS_POOL_FEE);
         }
+        assertGt(gpr.totalMinted(), 0, "totalMinted should be greater than 0");
+        assertEq(psm1Balance - crvusd.balanceOf(address(psm1)), gpr.totalMinted(), "totalMinted should be equal to the diff in psm balance");
     }
 
     function test_ReimburseAuthorization() public {
