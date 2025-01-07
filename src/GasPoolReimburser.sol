@@ -11,7 +11,7 @@ contract GasPoolReimburser is PrismaOwnable {
     using SafeERC20 for IERC20;
 
     uint256 public constant GAS_POOL_FEE = 200e18;
-    uint256 public constant MAX_DEBT_LIMIT = 10000e18;
+    uint256 public constant MAX_MINT_LIMIT = 10000e18;
     IPrismaPSM immutable public psm;
     IERC20 immutable public debtToken;
     IERC20 immutable public crvUSD;
@@ -47,7 +47,7 @@ contract GasPoolReimburser is PrismaOwnable {
 
     function _mint(uint256 amount) internal {
         totalMinted += amount;
-        require(totalMinted <= MAX_DEBT_LIMIT, "GPR: max debt limit exceeded");
+        require(totalMinted <= MAX_MINT_LIMIT, "GPR: max mint limit exceeded");
         IDebtToken(address(debtToken)).mint(address(this), amount);
     }
 

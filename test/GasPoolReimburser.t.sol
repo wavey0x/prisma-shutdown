@@ -60,6 +60,7 @@ contract GasPoolReimburserTest is Test {
         }
         assertGt(gpr.totalMinted(), 0, "totalMinted should be greater than 0");
         assertEq(psm1Balance - crvusd.balanceOf(address(psm1)), gpr.totalMinted(), "totalMinted should be equal to the diff in psm balance");
+        assertLt(crvusd.balanceOf(address(psm1)), psm1Balance, "psm1 balance should be less than before");
     }
 
     function test_ReimburseAuthorization() public {
@@ -70,14 +71,14 @@ contract GasPoolReimburserTest is Test {
 
     function test_CannotMintAboveLimit() public {
         address[] memory users = getUsers();
-        uint256 maxReimbursements = gpr.MAX_DEBT_LIMIT() / GAS_POOL_FEE / users.length;
+        uint256 maxReimbursements = gpr.MAX_MINT_LIMIT() / GAS_POOL_FEE / users.length;
         console.log("maxReimbursements", maxReimbursements);
         vm.startPrank(GUARDIAN);
         for (uint256 i = 0; i < maxReimbursements; i++) {
             gpr.reimburse(users);
         }
         // Next mint should exceed the limit
-        vm.expectRevert("GPR: max debt limit exceeded");
+        vm.expectRevert("GPR: max mint limit exceeded");
         gpr.reimburse(users);
     }
 
