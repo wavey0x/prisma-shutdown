@@ -36,6 +36,7 @@ contract GasPoolReimburser is PrismaOwnable {
     }
 
     function reimburse(address[] memory users) external onlyOwnerOrGPRGuardian {
+        require(users.length > 0, "GPR: no users");
         uint256 reimbursementAmount = users.length * GAS_POOL_FEE;
         _mint(reimbursementAmount);
         psm.sellDebtToken(reimbursementAmount);
