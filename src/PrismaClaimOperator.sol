@@ -105,7 +105,7 @@ contract PrismaClaimOperator {
     /**
      * @notice Sets the owner of the contract
      */
-    function setOwner(address _owner) external onlyAuthorized {
+    function setOwner(address _owner) external onlyOwner {
         require(_owner != address(0), "Invalid owner address");
         owner = _owner;
         emit OwnerSet(_owner);
