@@ -59,43 +59,43 @@ contract PrismaClaimOperator {
     /**
      * @notice Claims Curve admin fees from the Prisma voter proxy and sends them to the specified receiver
      * @dev Requires this contract has Prisma Core execute permissions on the proxy
-     * @param receiver The address to send the tokens to
+     * @param _receiver The address to send the tokens to
      */
-    function claimTo(address receiver) external onlyOwner {
-        _claimTo(receiver);
+    function claimTo(address _receiver) external onlyOwner {
+        _claimTo(_receiver);
     }
 
-    function _claimTo(address receiver) internal {
-        require(receiver != address(0), "Invalid receiver address");
+    function _claimTo(address _receiver) internal {
+        require(_receiver != address(0), "Invalid receiver address");
         feeDistributor.claim(address(proxy));
         uint256 balance = crvUSD.balanceOf(address(proxy));
         if (balance == 0) return;
         proxy.execute(
             address(crvUSD), 
-            abi.encodeWithSelector(IERC20.transfer.selector, receiver, balance)
+            abi.encodeWithSelector(IERC20.transfer.selector, _receiver, balance)
         );
     }
 
     /**
      * @notice Transfers tokens from the fee distributor to the treasury
      * @dev Requires this contract is an approved spender via the fee distributor
-     * @param token The token to transfer
+     * @param _token The token to transfer
      */
-    function transferFromFeeReceiver(IERC20 token) external onlyAuthorized {
-        _transferToTreasury(token, treasury);
+    function transferFromFeeReceiver(IERC20 _token) external onlyAuthorized {
+        _transferFromFeeReceiver(_token, treasury);
     }
 
     /**
      * @notice Transfers tokens from the fee distributor to the specified receiver
      * @dev Requires this contract is an approved spender via the fee distributor
-     * @param token The token to transfer
-     * @param recipient The address to transfer the tokens to
+     * @param _token The token to transfer
+     * @param _recipient The address to transfer the tokens to
      */
-    function transferFromFeeReceiverTo(IERC20 token, address recipient) external onlyOwner {
-        _transferToTreasury(token, recipient);
+    function transferFromFeeReceiverTo(IERC20 _token, address _recipient) external onlyOwner {
+        _transferFromFeeReceiver(_token, _recipient);
     }
 
-    function _transferToTreasury(IERC20 token, address recipient) internal {
+    function _transferFromFeeReceiver(IERC20 token, address recipient) internal {
         require(recipient != address(0), "Invalid recipient address");
         uint256 balance = token.balanceOf(address(prismaFeeReceiver));
         if (balance == 0) return;
